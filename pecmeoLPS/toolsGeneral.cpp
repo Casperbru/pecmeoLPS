@@ -119,7 +119,7 @@ void performNavigationEstimation(
     {
         std::string userSatellite = satelliteNames.at(i);
         Eigen::MatrixXi availabilityMatrix = availabilityMatrixAllUsers[ userSatellite ];
-//        writeMatrixToFile( availabilityMatrix, "availabilityMat_"+userSatellite+"_2.dat", 2, tudat_applications::getOutputPath( ) + "PECMEOAvailability");
+//        writeMatrixToFile( availabilityMatrix, "availabilityMat_"+userSatellite+"_2.dat", 2, tudat_applications::getOutputPath( ) + "PECMEOAvailability"); // Save availability matrix option
         std::map< double, Eigen::Vector3d > userSatellitePositionPerEpoch;
         for( unsigned long long i = 0; i < epochTimes.size(); i++ )
         {
@@ -127,6 +127,7 @@ void performNavigationEstimation(
             Eigen::Vector3d userSatellitePosition = satelliteEphemeris[ userSatellite ]->getCartesianState( epochTime ).segment( 0, 3 );
             userSatellitePositionPerUserPerEpoch[ userSatellite ][ epochTime ] = userSatellitePosition;
             userSatellitePositionPerEpoch[ epochTime ] = userSatellitePosition;
+            // For first epoch state, set deviation
             if(i==0){ aPrioriEstimationsPerUserFirstEpoch[ userSatellite ][ epochTime ] << userSatellitePosition + aPrioriDeviation, 0; }
 
             numberOfObservationsPerEpoch[ epochTime ] += availabilityMatrix.row(static_cast<int>(i)).sum(); // for remove loop
@@ -360,6 +361,7 @@ void getCurrentTime(
 
 
 //! Obtain the parameters to be optimised
+//! To be used for optimisation problem
 std::vector< double > obtainParamaterToBeOptimised(
         std::map< std::string, std::map< double, Eigen::VectorXd > > allUsersDOPResults)
 {
@@ -379,20 +381,15 @@ std::vector< double > obtainParamaterToBeOptimised(
     }
     double averageLink = std::accumulate( linkVector.begin(), linkVector.end(), 0.0)/linkVector.size();
     double averageGDOP = std::accumulate( GDOPVector.begin(), GDOPVector.end(), 0.0)/GDOPVector.size();
-//    auto mininumNumberOfLinks = std::min_element( linkVector.begin(), linkVector.end() );
-//    std::cout << "\nThis is minimum number of links: " << *mininumNumberOfLinks << " at " << epochVector.at(std::distance(linkVector.begin(), mininumNumberOfLinks)) << " seconds" << std::endl;
-//    std::cout << "Dit is GDOP op 210: " << GDOPVector.at(7) << std::endl;
-//    std::cout << "Dit is average links: " << averageLink << std::endl;
-//    std::cout << "Dit is average GDOP: " << averageGDOP << std::endl;
     std::vector< double > results;
     results = { averageLink, averageGDOP };
-//    results.push_back( averageLink );
     return results;
 }
 
 
 //! Retrieve optimisation parameters for all users
 //! Gives vector with average links, GDOP or PDOP over all users and epochs
+//! Only used for basic computations and verification
 void retrieveOptimisationParameters(
         PodInputDataType observationsAndTimes,
         std::vector< double > epochTimesTrue,
@@ -413,10 +410,9 @@ void retrieveOptimisationParameters(
     std::map< std::string, std::map< double, std::map< int, double > > > correctedPhasesPerUserPerEpoch;
     std::map< std::string, std::map< double, std::map< int, double > > > travelTimesPerUserPerEpoch;
 
-//    std::cout << epochTimes.back() << std::endl;
-
     unsigned long long numberOfEpochs = 0;
     std::vector< double > epochTimes;
+
     // Adding identifier to satellites for indexing
     std::vector< std::string > satelliteNamesGNSS = satelliteNames;
     std::rotate( satelliteNamesGNSS.begin(), satelliteNamesGNSS.begin() + numberOfSatellitesPEC, satelliteNamesGNSS.end() );
@@ -452,7 +448,6 @@ void retrieveOptimisationParameters(
             // Obtain list of epochs where a connection is made
             epochTimes = itrSingleObservableMap->second.second.first;
             numberOfEpochs = epochTimes.size();
-//            std::cout << satLinkNames.at(0) << " has " << numberOfEpochs << " with " << satLinkNames.at(1) << std::endl;
 
             // Loop over the epochs and create list of visible satellites, range and phase data and travel times per epoch
             for ( unsigned int i = 0 ; i < numberOfEpochs ; i++ )
@@ -466,31 +461,25 @@ void retrieveOptimisationParameters(
     epochTimes.clear();
     epochTimes = epochTimesTrue;
     numberOfEpochs = epochTimes.size();
-//    std::cout << numberOfEpochs << std::endl;
 
     // Loop over different users
     for( unsigned long long h = 0; h < numberOfSatellitesPEC; h++ )
     {
         // Current user
         std::string userSatellite = satelliteNames.at( h );
-//        std::cout << "nr " << h << std::endl;
-//        std::cout << userSatellite << std::endl;
 
         // Loop over all epochs
         std::map< double, Eigen::Vector3d > userSatellitePositionPerEpoch;
         for( unsigned int i = 0; i < numberOfEpochs; i++ )
         {
-//            std::cout << "epoch " << epochTimes.at( i ) << std::endl;
             double epochTime = epochTimes.at( i );
             std::vector< int > visibleSatelliteIDs = visibleSatelliteIDsPerEpochPerUser[ userSatellite ][ epochTime ];
             unsigned long long numberOfVisibleSatellites = visibleSatelliteIDs.size();
             Eigen::MatrixXd designMatrix( numberOfVisibleSatellites, 4 );
             Eigen::RowVector3d userSatellitePosition = satelliteEphemeris[ userSatellite ]->getCartesianState( epochTime ).segment( 0, 3 );
-//            std::cout << "nr of sat: " << numberOfVisibleSatellites << std::endl;
 
             for( unsigned long long j = 0; j < numberOfVisibleSatellites; j++ )
             {
-//                std::cout << "sat: " << satelliteIDsNames[ visibleSatelliteIDs.at(j) ] << std::endl;
                 int currentSatelliteID = visibleSatelliteIDs.at(j);
                 std::string currentSatelliteName = satelliteIDsNames[ currentSatelliteID ];
                 Eigen::RowVector3d GNSSSatellitePosition = satelliteEphemeris[ currentSatelliteName ]->getCartesianState( epochTime ).segment( 0, 3 );
@@ -534,7 +523,6 @@ void retrieveOptimisationParameters(
 
     double maxGDOP = *std::max_element( GDOPVector.begin(), GDOPVector.end() );
 
-
 //    auto mininumNumberOfLinks = std::min_element( linkVector.begin(), linkVector.end() );
 //    std::cout << "\nThis is minimum number of links: " << *mininumNumberOfLinks << " at " << epochVector.at(std::distance(linkVector.begin(), mininumNumberOfLinks)) << " seconds" << std::endl;
 //    auto mininumGDOP = std::min_element( GDOPVector.begin(), GDOPVector.end() );
@@ -555,7 +543,6 @@ void retrieveOptimisationParameters(
     std::default_random_engine generator(123);
     std::uniform_real_distribution<double> distributionErrorSMA(-beginErrorSMA,beginErrorSMA);
     int numberOfArcs = epochTimes.back()/arcTime+1;
-    std::cout << "back: " << epochTimes.back() << " and no of arcs: " << numberOfArcs << " and no of gnss: " << numberOfSatellites << std::endl;
     Eigen::MatrixXd ephemerisErrorBase( numberOfArcs, numberOfSatellites );
     for( double arc = 0; arc < numberOfArcs; arc++ )
     {
@@ -564,21 +551,21 @@ void retrieveOptimisationParameters(
             ephemerisErrorBase( arc, prn ) = distributionErrorSMA(generator);
         }
     }
-    std::cout << "alsjeblieft:\n" << ephemerisErrorBase << std::endl;
+
+    // Loop over users
     for( unsigned long long sat = 0; sat < numberOfSatellites-9; sat++)
     {
         std::string currentSatelliteName = satelliteIDsNames[ sat ];
         auto currentSatelliteEphemeris = satelliteEphemeris[ currentSatelliteName ];
-//        std::cout << "\nsat: " << currentSatelliteName << std::endl;
         for( unsigned int i = 0; i < numberOfEpochs; i++ )
         {
             double epochTime = epochTimes.at( i );
             int arcNumber = floor(epochTime/arcTime);
-            double arcEpochTime = floor(epochTime/arcTime)*arcTime; // DEZE
-            double arcPropagationTime = epochTime - arcEpochTime; // DEZE
+            double arcEpochTime = floor(epochTime/arcTime)*arcTime;
+            double arcPropagationTime = epochTime - arcEpochTime;
             double maxErrorSMA = ephemerisErrorBase( arcNumber, sat );
-            double errorSMA = maxErrorSMA; //or maxErrorSMA/arcTime*arcPropagationTime;
-            double earthGravitationalParameter = 3.986004418e14; // DEZE
+            double errorSMA = maxErrorSMA;
+            double earthGravitationalParameter = 3.986004418e14;
 
             Eigen::Vector6d arcBeginStateCart = satelliteEphemeris[ currentSatelliteName ]->getCartesianState( arcEpochTime );
             Eigen::Vector6d arcBeginStateKep = orbital_element_conversions::convertCartesianToKeplerianElements(arcBeginStateCart, earthGravitationalParameter);
@@ -588,12 +575,6 @@ void retrieveOptimisationParameters(
 
             allSatellitesPertubedHistory[ sat ][ epochTime ] = arcPropagatedStateCart;
             allSatellitesPertubedHistoryKep[ sat ][ epochTime ] = arcPropagatedStateKep;
-
-//            Eigen::RowVector3d GNSSSatellitePosition = satelliteEphemeris[ currentSatelliteName ]->getCartesianState( epochTime ).segment( 0, 3 );
-//            std::cout << "epoch: " << epochTime << " pos: " << GNSSSatellitePosition << std::endl;
-//            std::cout << "       " << epochTime << " pos: " << arcPropagatedStateCart.segment(0 , 3).transpose() << std::endl;
-//            std::cout << "       " << epochTime << "    : " << (GNSSSatellitePosition-arcPropagatedStateCart.segment(0 , 3).transpose()).norm() << std::endl;
-//            std::cout << (GNSSSatellitePosition-arcPropagatedStateCart.segment(0 , 3).transpose()).norm() << ", ";
         }
 
         // Set filename for output data.
@@ -622,8 +603,6 @@ void retrieveOptimisationParameters(
                                 std::numeric_limits< double >::digits10,
                                 "," );
     }
-
-
 
     results = { averageLink, averageGDOP, averagePDOP, maxGDOP };
 }

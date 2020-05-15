@@ -26,8 +26,6 @@ std::shared_ptr< constellationLoader > getConstellation( constellationNames cons
     switch( constellationName )
     {
     case Galileo:
-
-        nummer = std::asin(20379731.357588/29598604.502011);
         // Set number of satellites in constellation.
         numberOfSatellites = 30;
         // Set number of planes in constellation.
@@ -46,8 +44,6 @@ std::shared_ptr< constellationLoader > getConstellation( constellationNames cons
         break;
 
     case GLONASS:
-
-        nummer = std::asin(20379731.357588/25476055.967582);
         // Set number of satellites in constellation.
         numberOfSatellites = 24;
         // Set number of planes in constellation.
@@ -66,8 +62,6 @@ std::shared_ptr< constellationLoader > getConstellation( constellationNames cons
         break;
 
     case BeiDou: // Note that for now only the MEO satellites are considered (there are also 3 IGSO and 5 GEO satellites)
-
-        nummer = std::asin(20379731.357588/27876410.622036);
         // Set number of satellites in constellation.
         numberOfSatellites = 27;
         // Set number of planes in constellation.
@@ -86,8 +80,6 @@ std::shared_ptr< constellationLoader > getConstellation( constellationNames cons
         break;
 
     case GPS: // Note that the old constellation is used and not the current one with 30 satellites
-
-        nummer = std::asin(20379731.357588/26576436.003112);
         // Set number of satellites in constellation.
         numberOfSatellites = 24;
         // Set number of planes in constellation.
@@ -132,7 +124,8 @@ void setConstellation(
     numberOfSatellitesTotal = numberOfSatellitesPEC;
     std::string currentName;
 
-    for (unsigned int i = 0; i < numberOfConstellations; i++) // Load all the different constellations and set initial state of satellites
+    // Load all the different constellations and set initial state of satellites
+    for (unsigned int i = 0; i < numberOfConstellations; i++)
     {
         Eigen::VectorXd orbitalElements( 6 ) ;
         Eigen::Vector4i constellationConfig;
@@ -149,8 +142,6 @@ void setConstellation(
 
         numberOfSatellitesTotal += static_cast< unsigned >(constellationConfig(0));
 
-//        setInitialConditions ics( orbitalElements, constellationConfig );
-//        initialConditionsInKeplerianElements = ics.getInitStateKep();
         initialConditionsInKeplerianElements = setInitialConds( orbitalElements, constellationConfig );
 
         if (currentName == "GPS"){ // Set different true anomaly spacing.
@@ -167,9 +158,11 @@ void setConstellation(
             }
         }
 
+        // Add initial conditions to complete matrix
         initialConditionsInKeplerianElementsTotal.resize(initialConditionsInKeplerianElementsTemp.rows(), initialConditionsInKeplerianElementsTemp.cols() + initialConditionsInKeplerianElements.cols() );
         initialConditionsInKeplerianElementsTotal << initialConditionsInKeplerianElementsTemp, initialConditionsInKeplerianElements;
 
+        // Set satellite names
         for ( int i = 0; i < constellationConfig(0); i++)
         {
             std::string satDesignation;
@@ -178,11 +171,9 @@ void setConstellation(
             else
             {satDesignation = "Sat";}
 
-//            satelliteNames.push_back( currentName+"Sat"+std::to_string(i+1) );
             satelliteNames.push_back( currentName+satDesignation+std::to_string(i+1) );
         }
     }
-
 }
 
 
@@ -245,22 +236,15 @@ void setPECMEO(
     for ( unsigned int i = 0; i < numberOfPlanesPEC; i++ )
     {
         initialConditionsInKeplerianElementsPEC.block( 5, i * numberOfSatellitesPerPlanePEC, 1, numberOfSatellitesPerPlanePEC ) =
-//                Eigen::MatrixXd::Constant( 1, numberOfSatellitesPerPlanePEC, trueAnomalySpacingPEC ).array( ) * trueAnomalySpacingIntegersPEC.array( );// + 0.0001*mathematical_constants::PI; // Small offset so 1 and 4 wont "collide"
+//                Eigen::MatrixXd::Constant( 1, numberOfSatellitesPerPlanePEC, trueAnomalySpacingPEC ).array( ) * trueAnomalySpacingIntegersPEC.array( );// + 0.0001*mathematical_constants::PI; // Manual offset so 1 and 4 wont "collide"
                 Eigen::MatrixXd::Constant( 1, numberOfSatellitesPerPlanePEC, trueAnomalySpacingPEC ).array( ) * trueAnomalySpacingIntegersPEC.array( ) + argumentOfLattitudeShift.at(i); // Offset in argument of lattitude shift
     }
 
+    // Set satellite names
     for (unsigned int i = 0; i <numberOfSatellitesPEC; i++)
     {
         satelliteNames.push_back( "PECMEOSat"+std::to_string(i+1) );
     }
-
-    // For only looking at one satellite
-//    unsigned int sat = 4;
-//    std::string satname = satelliteNames.at(sat);
-//    Eigen::MatrixXd tempCond = initialConditionsInKeplerianElementsPEC.col(sat);
-//    initialConditionsInKeplerianElementsPEC = tempCond;
-//    satelliteNames.clear();
-//    satelliteNames.push_back(satname);
 }
 
 
@@ -269,7 +253,7 @@ Eigen::MatrixXd setInitialConds(
         Eigen::VectorXd orbitalElements,
         Eigen::Vector4i constellationConfig)
 {
-    // Split the constellatio  configuration in integers
+    // Split the constellation configuration in integers
     // With numberOfSatellites, numberOfPlanes, numberOfSatellitesPerPlane, sizeOfState
     int nos = constellationConfig(0);
     int nop = constellationConfig(1);

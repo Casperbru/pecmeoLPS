@@ -52,6 +52,7 @@ Eigen::Vector6d getDOPValues(
     double numberOfNavigationSatellites = positionMatrixGNSSSatellites.rows();
     Eigen::MatrixXd covarianceMatrix = getCovarianceMatrix( userSatellitePosition, positionMatrixGNSSSatellites );
 
+    // Take the squares of the variances in the covariance matrix to obtain desired DOPs
     double valueGDOP = sqrt( covarianceMatrix(0,0) + covarianceMatrix(1,1) + covarianceMatrix(2,2) + covarianceMatrix(3,3) );
     double valuePDOP = sqrt( covarianceMatrix(0,0) + covarianceMatrix(1,1) + covarianceMatrix(2,2) );
     double valueHDOP = sqrt( covarianceMatrix(0,0) + covarianceMatrix(1,1) );
@@ -80,18 +81,16 @@ std::map< double, Eigen::VectorXd > getDOPValues(
         double numberOfNavigationSatellites = positionMatrixGNSSSatellitesAllEpochs[ epochTime ].rows();
         Eigen::MatrixXd covarianceMatrix = getCovarianceMatrix( userSatellitePositionAllEpochs[ epochTime ], positionMatrixGNSSSatellitesAllEpochs[ epochTime ] );
 
-//        std::cout << "real at " << epochTime << " var: " << covarianceMatrix(0,0) << " " << covarianceMatrix(1,1) << " " << covarianceMatrix(2,2) << " " << covarianceMatrix(3,3) << std::endl;
+        // Take the squares of the variances in the covariance matrix to obtain desired DOPs
         double valueGDOP = sqrt( covarianceMatrix(0,0) + covarianceMatrix(1,1) + covarianceMatrix(2,2) + covarianceMatrix(3,3) );
         double valuePDOP = sqrt( covarianceMatrix(0,0) + covarianceMatrix(1,1) + covarianceMatrix(2,2) );
         double valueHDOP = sqrt( covarianceMatrix(0,0) + covarianceMatrix(1,1) );
         double valueVDOP = sqrt( covarianceMatrix(2,2) );
         double valueTDOP = sqrt( covarianceMatrix(3,3) );
 
+        // Put all DOP results in vector
         Eigen::VectorXd resultsVector(9);
-//        std::cout << "Letop" << std::endl;
-//        std::cout << resultsVector << std::endl;
         resultsVector << numberOfNavigationSatellites, valueGDOP, valuePDOP, valueHDOP, valueVDOP, valueTDOP, userSatellitePositionAllEpochs[ epochTime ];
-//        std::cout << resultsVector << std::endl;
         resultsVectorMap[ epochTime ] = resultsVector;
     }
     return resultsVectorMap;
@@ -133,8 +132,8 @@ std::map< double, Eigen::MatrixXd > getPositionMatrixGNSSSatellites(
 // ///  SINGLE POINT POSITIONING
 //! Perform one single point positioning estimation iteration based on ephemeris of GNSS
 //! a priori information is the input and the output are updated estimations using availability matrix
-Eigen::VectorXd getPointPositionIteration( //conversionx
-        Eigen::VectorXd aPrioriEstimation, // 4->X
+Eigen::VectorXd getPointPositionIteration(
+        Eigen::VectorXd aPrioriEstimation,
         Eigen::VectorXd rangeData,
         std::map< std::string, Eigen::RowVectorXi > availabilityRowPerUser,
         std::vector< std::shared_ptr< Ephemeris > > satelliteEphemerisGNSS,
@@ -158,40 +157,43 @@ Eigen::VectorXd getPointPositionIteration( //conversionx
     Eigen::VectorXd aPrioriRange= Eigen::VectorXd::Zero( numberOfObservations );
     int userIndex = 0;
     int observationIndex = 0;
+
+    // Loop over users by looking at availilbity matrix map
     for( std::map< std::string, Eigen::RowVectorXi >::iterator itrUser = availabilityRowPerUser.begin(); itrUser != availabilityRowPerUser.end(); itrUser++ )
     {
+        // Set user constants
         std::string userSatellite = itrUser->first;
         userNames.push_back( userSatellite );
         Eigen::RowVectorXi availabilityRow = itrUser->second;
         auto numberOfObservationsTotal = availabilityRowPerUser[ userSatellite ].size();
-//        auto numberOfObservations = availabilityRow.sum();
         std::map< int, double > travelTimes = travelTimesPerUser[ userSatellite ];
 
+        // Find a priori position and clock offset
         Eigen::Vector3d aPrioriPosition = aPrioriEstimation.segment( userIndex*4, 3 );
         double clockError = aPrioriEstimation( userIndex*4+3 )/lightConstant;
-//        double clockError = 0;
+//        double clockError = 0; // For no clock estimation
 
+        // Loop over observations
         for(  int prn = 0; prn < numberOfObservationsTotal; prn++ )
         {
             if( availabilityRow( prn ) == 1 )
             {
+                // Determine correct epoch time to receive correct state from ephemeris
                 double correctedEpochTime = epochTime - clockError;
                 if( lighttimeCorrection ){ correctedEpochTime = epochTime - clockError - travelTimes[ prn ]; }
-//                std::cout << "Dit is epoch time: " << epochTime << ", dit met clock error: " << epochTime - clockError << " en dit is corrected: " << correctedEpochTime << std::endl;
                 Eigen::Vector3d currentGNSSPosition = satelliteEphemerisGNSS.at(static_cast<unsigned>(prn))->getCartesianState( correctedEpochTime ).segment( 0, 3 );
 
                 if( ephemerisError )
                 {
+                    // Determine ephemeris arc number
                     int arcNumber = floor(epochTime/arcTime);
-                    double arcEpochTime = floor(epochTime/arcTime)*arcTime; // DEZE
-                    double arcPropagationTime = correctedEpochTime - arcEpochTime; // DEZE
+                    double arcEpochTime = floor(epochTime/arcTime)*arcTime;
+                    double arcPropagationTime = correctedEpochTime - arcEpochTime;
                     double maxErrorSMA = ephemerisErrorBase( arcNumber, prn );
-                    double errorSMA = maxErrorSMA; //or maxErrorSMA/arcTime*arcPropagationTime;
-                    double earthGravitationalParameter = 3.986004418e14; // DEZE
-//                    std::cout << "arcNumber: " << arcNumber << ", arcEpochTime: " << arcEpochTime << ", epochTime: " << epochTime << ", errorSMA: " << errorSMA << std::endl;
-//                    std::cout << "maxErrorSMA: " << maxErrorSMA << ", arcTime: " << arcTime << ", arcPropagationTime: " << arcPropagationTime << ", errorSMA: " << errorSMA << std::endl;
+                    double errorSMA = maxErrorSMA;
+                    double earthGravitationalParameter = 3.986004418e14;
 
-                    // Correct method
+                    // Obtain state at start ephemeris error and propagate Kepler orbit to receive perturbed state at epoch
                     Eigen::Vector6d arcBeginStateCart = satelliteEphemerisGNSS.at(static_cast<unsigned>(prn))->getCartesianState( arcEpochTime );
                     Eigen::Vector6d arcBeginStateKep = orbital_element_conversions::convertCartesianToKeplerianElements(arcBeginStateCart, earthGravitationalParameter);
                     arcBeginStateKep(0) += errorSMA;
@@ -201,53 +203,51 @@ Eigen::VectorXd getPointPositionIteration( //conversionx
                     currentGNSSPosition = arcPropagatedStateCart.segment(0,3);
                 }
 
+                // Determine part of computed range
                 Eigen::Vector3d positionDifference = aPrioriPosition - currentGNSSPosition;
                 weightMatrix( observationIndex, observationIndex ) = codeWeight;
                 double clockErrorLink = 0.0;
                 if( prn >= numberOfGNSS )
                 {
+                    // If ISL, determine partial derivatives for other LPS satellite
                     int otherUserIndex = prn-numberOfGNSS;
                     positionDifference = aPrioriPosition - aPrioriEstimation.segment( otherUserIndex*4, 3 );                    
                     largeDesignMatrix.block( observationIndex, otherUserIndex*4, 1, 4 ) << -positionDifference.transpose() / positionDifference.norm(), -1;
                     clockErrorLink = -aPrioriEstimation( otherUserIndex*4+3 );
                     weightMatrix( observationIndex, observationIndex ) = codeWeightISL;
-//                    std::cout << "Link " << userIndex << " with " <<  otherUserIndex << ", that is obs# " << observationIndex << std::endl;
-//                    std::cout << " pos dif " << positionDifference.transpose() << std::endl;
-//                    std::cout << " block binnen " << -positionDifference.transpose() / positionDifference.norm() << std::endl;
                 }
-                aPrioriRange( observationIndex, 0 ) = positionDifference.norm() + aPrioriEstimation( userIndex*4+3 ) + clockErrorLink;  // ? extra clock error
+
+                // Determine computed range
+                aPrioriRange( observationIndex, 0 ) = positionDifference.norm() + aPrioriEstimation( userIndex*4+3 ) + clockErrorLink;
+                // Store partial derivatives in large design matrix
                 largeDesignMatrix.block( observationIndex, userIndex*4, 1, 4 ) << positionDifference.transpose() / positionDifference.norm(), 1;                
-//                std::cout << "Link " << userIndex << " with " <<  prn << ", that is obs# " << observationIndex << std::endl;
-//                std::cout << " aPrioriPosition: " << aPrioriPosition.transpose() << "\n currentGNSSPosition: " << currentGNSSPosition.transpose() << std::endl;
-//                std::cout << " pos dif " << positionDifference.transpose() << std::endl;
-//                std::cout << " block " << positionDifference.transpose() / positionDifference.norm() << std::endl;
-//                std::cout << "design matrix na rij " << observationIndex+1 << ": \n" << largeDesignMatrix << std::endl << std::endl;
                 observationIndex += 1;
             }
         }
         userIndex += 1;
     }
 
-    Eigen::MatrixXd covarianceMatrix = ( largeDesignMatrix.transpose() * weightMatrix * largeDesignMatrix ).inverse(); //    std::cout << "at " << epochTime << " var: " << covarianceMatrix.diagonal().transpose() << std::endl;
+    // Create covariance and normal matrix
+    Eigen::MatrixXd covarianceMatrix = ( largeDesignMatrix.transpose() * weightMatrix * largeDesignMatrix ).inverse();
     Eigen::MatrixXd normalMatrix = largeDesignMatrix.transpose() * weightMatrix * largeDesignMatrix;
+
+    // Determine state correction
     Eigen::VectorXd deltaPosition = ( largeDesignMatrix.transpose() * weightMatrix * largeDesignMatrix ).inverse() * largeDesignMatrix.transpose() * weightMatrix * ( rangeData - aPrioriRange );
 
-    if( numberOfUsers > 1 )
+    // Some printing obtains for testing and verification
+    if( numberOfUsers > 1 ) //&& (epochTime == 0.0||epochTime == 30.0 )
     {
 //        Eigen::JacobiSVD<Eigen::MatrixXd> svd(normalMatrix);
 //        double cond = svd.singularValues()(0) / svd.singularValues()(svd.singularValues().size()-1);
 //        std::cout << "With code: " << pow( codeWeightISL, -0.5 ) << " and weight " << codeWeightISL << " op epoch: " << epochTime << " condition number: " << cond << std::endl;
 //        if( cond > codeWeightISL/1.0e5 ){ std::cout << "Maybe" << std::endl; }
-    }
 
-    if( numberOfUsers == 1 && (epochTime == 0.0||epochTime == 30.0 ) )
-    {
-//        std::cout << "\nAt epoch " << epochTime << ": "<< std::endl;
-//        std::cout << "\ndesign matrix: \n" << largeDesignMatrix << std::endl << std::endl;
-//        std::cout << "normal matrix: \n" << ( largeDesignMatrix.transpose() * largeDesignMatrix ) << std::endl << std::endl;
-//        std::cout << " rangeData   : " << rangeData.transpose() << "\n\n aPrioriRange: " << aPrioriRange.transpose() << "\n\n van elkaaraf: " << ( rangeData - aPrioriRange ).transpose() << std::endl;
-//        std::cout << "\n je delta  " << deltaPosition.size() << ": \n" << deltaPosition.transpose() << std::endl;
-//        std::cout << "\n Solution  " << (aPrioriEstimation + deltaPosition).size() << ": " << (aPrioriEstimation + deltaPosition).transpose() << std::endl;
+        //        std::cout << "\nAt epoch " << epochTime << ": "<< std::endl;
+        //        std::cout << "\ndesign matrix: \n" << largeDesignMatrix << std::endl << std::endl;
+        //        std::cout << "normal matrix: \n" << ( largeDesignMatrix.transpose() * largeDesignMatrix ) << std::endl << std::endl;
+        //        std::cout << " rangeData   : " << rangeData.transpose() << "\n\n aPrioriRange: " << aPrioriRange.transpose() << "\n\n van elkaaraf: " << ( rangeData - aPrioriRange ).transpose() << std::endl;
+        //        std::cout << "\n je delta  " << deltaPosition.size() << ": \n" << deltaPosition.transpose() << std::endl;
+        //        std::cout << "\n Solution  " << (aPrioriEstimation + deltaPosition).size() << ": " << (aPrioriEstimation + deltaPosition).transpose() << std::endl;
     }
 
     return aPrioriEstimation + deltaPosition;
@@ -330,6 +330,8 @@ std::map< std::string, std::map< double, Eigen::Vector4d > > getPointPositionSeq
         std::vector< std::string > userNames;
         std::map< std::string, std::map< int, double > > travelTimesPerUser;
         std::map< std::string, Eigen::RowVectorXi > availabilityRowPerUser;
+
+        // Loop over users to obtain correct observation data
         for( std::map< std::string, Eigen::MatrixXi >::iterator itrUser = availabilityMatrixPerUser.begin(); itrUser != availabilityMatrixPerUser.end(); itrUser++ )
         {
             std::string userSatellite = itrUser->first;
@@ -349,14 +351,13 @@ std::map< std::string, std::map< double, Eigen::Vector4d > > getPointPositionSeq
 
         Eigen::MatrixXd iterationCoordinateHistory( aPrioriEstimation.size(), 1 );
         Eigen::VectorXd estimatedPositions = getPointPositionEstimation( rangeDataLocal, availabilityRowPerUser, iterationCoordinateHistory, satelliteEphemerisGNSS, epochTime, codeWeight, codeWeightISL, ephemerisError, arcTime, ephemerisErrorBase, maxIterations, correctionLimit, aPrioriEstimation, lighttimeCorrection, travelTimesPerUser );
+
+        // Loop over users and save estimations and iteration history
         for( unsigned long long i = 0; i < numberOfUsers; i++ )
         {
             std::string userSatellite = userNames.at(i);
             estimationsPPPerUser[ userSatellite ][ epochTime ] = estimatedPositions.segment( static_cast<signed>(i)*4, 4 );
             unsigned long long numberOfaPrioriAvailable = aPrioriEstimationsPerUser[ userSatellite ].size();
-//            std::cout << userSatellite << " at " << epochTime << ": " << estimationsPPPerUser[ userSatellite ][ epochTime ] << std::endl;
-//            std::cout << "HIER : " << numberOfaPrioriAvailable << " & " <<  numberOfEpochs << " & " << epoch+1 << std::endl;
-//            std::cout << "with " << userSatellite << " at " << epochTime << " we have est: " << estimationsPPPerUser[ userSatellite ][ epochTime ].transpose() << std::endl;
             if( numberOfaPrioriAvailable < numberOfEpochs && epoch+1 < numberOfEpochs )
             {
                 double nextEpochTime = epochTimes.at( epoch+1 );
@@ -380,7 +381,8 @@ std::map< std::string, std::map< double, Eigen::Vector4d > > getPointPositionSeq
 
 // /// KINEMATIC ORBIT DETERMINATION
 //! Perform a single iteration of kinematic estimation of satellite position, clock errors and bias
-//! Older version without block elimination and spars matrices, very slow
+//! Older version without block elimination and spars matrices, very slow, does not work for big
+//! simulations, can not allocate the large matrices
 Eigen::VectorXd getKinematicIteration(
         std::vector< double > epochTimes,
         std::vector< std::shared_ptr< Ephemeris > > satelliteEphemerisGNSS,
@@ -395,7 +397,6 @@ Eigen::VectorXd getKinematicIteration(
         bool lighttimeCorrection,
         std::map< std::string, std::map< double, std::map< int, double > > > travelTimesPerUserPerEpoch)
 {
-    std::cout << "Not smart" << std::endl;
     // Determine constants
     double lightConstant = physical_constants::getSpeedOfLight< double >();
     long long numberOfEpochs = static_cast<signed>( epochTimes.size() );
@@ -404,7 +405,6 @@ Eigen::VectorXd getKinematicIteration(
     int numberOfSatellites = static_cast<int>( satelliteEphemerisGNSS.size() );
     int numberOfGNSS = numberOfSatellites - numberOfUsers;
     int numberOfMeasurements = 2;
-//    int numberOfMeasurements = 2;
 
     // Dynamically grow apriori estimation vector
     Eigen::VectorXd aPrioriEstimations = aPrioriEstimationsCurrent;
@@ -447,25 +447,18 @@ Eigen::VectorXd getKinematicIteration(
         double aPrioriBias = differenceRangePhaseSum / numberOfBiasNumbers;
         aPrioriEstimations( numberOfEstimationsCurrent ) = aPrioriBias;
     }
-std::cout << "Not smart" << std::endl;
-std::cout << "Not smart " << numberOfMeasurements << std::endl;
+
     // Pre-allocate vectors and matrices
     Eigen::MatrixXd designMatrix = Eigen::MatrixXd::Zero( numberOfMeasurements, numberOfEpochs*numberOfUsers*4 + numberOfBiases );
-    std::cout << "Not smart" << std::endl;
     Eigen::VectorXd measurements = Eigen::VectorXd::Zero( numberOfMeasurements );
-    std::cout << "Not smart" << std::endl;
     Eigen::VectorXd model = Eigen::VectorXd::Zero( numberOfMeasurements );
-    std::cout << "Not smart" << std::endl;
 //    Eigen::MatrixXd weightMatrix = Eigen::MatrixXd::Identity( numberOfMeasurements, numberOfMeasurements );
 //    Eigen::MatrixXd weightMatrix( numberOfMeasurements, numberOfMeasurements );
     Eigen::MatrixXd weightMatrix = Eigen::MatrixXd::Zero( numberOfMeasurements, numberOfMeasurements );
-    std::cout << "Not smart" << std::endl;
 //    weightMatrix.setIdentity();
-    std::cout << "Not smart" << std::endl;
     Eigen::VectorXd correction = Eigen::VectorXd::Zero( numberOfEpochs*numberOfUsers*4 + numberOfBiases );
 
     // Loop over all the epochs
-    std::cout << "Not smart" << std::endl;
     int rowIterator = 0;
     for( int epoch = 0; epoch < numberOfEpochs; epoch++ )
     {
@@ -491,22 +484,21 @@ std::cout << "Not smart " << numberOfMeasurements << std::endl;
                 if( availabilityRow( prn ) == 1 )
                 {
                     int biasNumber = biasNumbers( epoch, prn ) - 1;
-
+                    // Determine correct epoch time to receive correct state from ephemeris
                     double correctedEpochTime = epochTime - clockError;
                     if( lighttimeCorrection ){ correctedEpochTime = epochTime - clockError - travelTimes[ prn ]; }
                     Eigen::Vector3d currentGNSSPosition = satelliteEphemerisGNSS.at( static_cast<unsigned>( prn ) )->getCartesianState( correctedEpochTime ).segment( 0, 3 );
                     if( ephemerisError )
                     {
+                        // Determine ephemeris arc number
                         int arcNumber = floor(epochTime/arcTime);
-                        double arcEpochTime = floor(epochTime/arcTime)*arcTime; // DEZE
-                        double arcPropagationTime = correctedEpochTime - arcEpochTime; // DEZE
+                        double arcEpochTime = floor(epochTime/arcTime)*arcTime;
+                        double arcPropagationTime = correctedEpochTime - arcEpochTime;
                         double maxErrorSMA = ephemerisErrorBase( arcNumber, prn );
-                        double errorSMA = maxErrorSMA; //or maxErrorSMA/arcTime*arcPropagationTime;
-                        double earthGravitationalParameter = 3.986004418e14; // DEZE
-    //                    std::cout << "arcNumber: " << arcNumber << ", arcEpochTime: " << arcEpochTime << ", epochTime: " << epochTime << ", errorSMA: " << errorSMA << std::endl;
-    //                    std::cout << "maxErrorSMA: " << maxErrorSMA << ", arcTime: " << arcTime << ", arcPropagationTime: " << arcPropagationTime << ", errorSMA: " << errorSMA << std::endl;
+                        double errorSMA = maxErrorSMA;
+                        double earthGravitationalParameter = 3.986004418e14;
 
-                        // Correct method
+                        // Obtain state at start ephemeris error and propagate Kepler orbit to receive perturbed state at epoch
                         Eigen::Vector6d arcBeginStateCart = satelliteEphemerisGNSS.at(static_cast<unsigned>(prn))->getCartesianState( arcEpochTime );
                         Eigen::Vector6d arcBeginStateKep = orbital_element_conversions::convertCartesianToKeplerianElements(arcBeginStateCart, earthGravitationalParameter);
                         arcBeginStateKep(0) += errorSMA;
@@ -516,12 +508,13 @@ std::cout << "Not smart " << numberOfMeasurements << std::endl;
                         currentGNSSPosition = arcPropagatedStateCart.segment(0,3);
                     }
 
+                    // Pre-allocate observation row of design matrix
                     Eigen::RowVectorXd observationRow = Eigen::RowVectorXd::Zero( numberOfUsers*4 );
                     Eigen::Vector3d positionDifference = aPrioriPosition - currentGNSSPosition;
-                    std::cout << "apriori pos: " << aPrioriPosition.transpose() << "\n currenGNSS: " << currentGNSSPosition.transpose() << "\n positi dif: " << positionDifference.transpose() << std::endl;
                     double clockErrorLink = 0.0;
                     if( prn >= numberOfGNSS )
                     {
+                        // If ISL, determine partial derivatives for other LPS satellite
                         codeWeight = codeWeightISL;
                         phaseWeight = phaseWeightISL;
                         int otherUserIndex = prn-numberOfGNSS;
@@ -530,6 +523,7 @@ std::cout << "Not smart " << numberOfMeasurements << std::endl;
                         clockErrorLink = aPrioriEstimations( epoch * numberOfUsers * 4 + otherUserIndex*4+3 );
                     }
 
+                    // Determine observation row
                     observationRow.segment( userIndex*4, 4) << positionDifference.transpose()/positionDifference.norm(), 1;
 
                     // Add phase measurement to design matrix and weight matrix
@@ -567,14 +561,17 @@ std::cout << "Not smart " << numberOfMeasurements << std::endl;
     std::chrono::system_clock::time_point time1 = std::chrono::system_clock::now();
     correction = (designMatrix.transpose() * weightMatrix * designMatrix).ldlt().solve( designMatrix.transpose() * weightMatrix * currentError );
     std::chrono::system_clock::time_point time2 = std::chrono::system_clock::now();
-    std::cout << "correction.size ldlt: " << correction.size() << std::endl;
     getCurrentTime( time1, time2 );
 
+    // Determine normal matrix
     Eigen::MatrixXd normalMatrix = designMatrix.transpose() * weightMatrix * designMatrix;
+
+    // Print options
     if( numberOfUsers > 1 ){
-        writeMatrixToFile( Eigen::MatrixXd(normalMatrix), "Ntot___.dat", 16, "C:/tudatBundle/tudatApplications/stepTwo/SimulationOutput/matrices");
+//        writeMatrixToFile( Eigen::MatrixXd(normalMatrix), "Ntot___.dat", 16, "C:/tudatBundle/tudatApplications/stepTwo/SimulationOutput/matrices");
     }
 
+    // Determine new state
     Eigen::VectorXd estimation = aPrioriEstimations + correction;
 
     return estimation;
@@ -646,7 +643,6 @@ Eigen::VectorXd getKinematicIterationSmart(
                     if( biasNumbers( i, j ) == addedBiasNumber )
                     {
                         differenceRangePhaseSum += rangeData[ userSatellite ][ epochTime ][ j ] - phaseData[ userSatellite ][ epochTime ][ j ];
-//                        differenceRangePhaseSum += phaseData[ userSatellite ][ epochTime ][ j ] - rangeData[ userSatellite ][ epochTime ][ j ];
                         numberOfBiasNumbers += 1;
                     }
                 }
@@ -658,58 +654,58 @@ Eigen::VectorXd getKinematicIterationSmart(
         double aPrioriBias = differenceRangePhaseSum / numberOfBiasNumbers;
         aPrioriEstimations( numberOfEstimationsCurrent ) = aPrioriBias;
         apriBias( addedBiasNumber - 1 ) = aPrioriBias/numberOfBiasNumbers;
-//        std::cout << "At est pos " << numberOfEstimationsCurrent << " and biasno " << addedBiasNumber  << " a priori bias: " << aPrioriBias << std::endl;;
     }
 
     // Loop over all the epochs
-//    std::cout << "Start loop over epochs" << std::endl; getCurrentTime();
     for( int epoch = 0; epoch < numberOfEpochs; epoch++ )
     {
+        // Pre-allocate sub-matrix corresponding to current epoch.
         Eigen::MatrixXd NxxLocal = Eigen::MatrixXd::Zero( localMatrixSize, localMatrixSize );
         double epochTime = epochTimes.at(static_cast<unsigned>(epoch));
         int userIndex = 0;
-//        std::cout << " Start loop over users bij epoch nummer " << epoch << " met tijd " << epochTime << std::endl;
+
+        // Loop over different users
         for( std::map< std::string, Eigen::MatrixXi >::iterator itrUser = availabilityMatrixPerUser.begin(); itrUser != availabilityMatrixPerUser.end(); itrUser++ )
         {
+            // Set current users, corresponing bias numbers and travel times
             std::string userSatellite = itrUser->first;
             Eigen::RowVectorXi availabilityRow = itrUser->second.row( epoch );
             auto numberOfObservations = availabilityRow.size();
-//            if( numberOfUsers > 1 ){ // no ISL
-//                numberOfObservations += -9;
-//            }
-
+//            if( numberOfUsers > 1 ){ numberOfObservations += -9; } // Option for no ISL, but simultaneous solving
             Eigen::MatrixXi biasNumbers = biasNumbersPerUser[ userSatellite ];
-
             std::map< int, double > travelTimes = travelTimesPerUserPerEpoch[ userSatellite ][ epochTime ];
 
+            // Determine the a priori state for current user and epoch
             Eigen::VectorXd aPrioriEstimationsLocal = aPrioriEstimations.segment( epoch*localMatrixSize + userIndex*4, 4 );
             Eigen::Vector3d aPrioriPosition = aPrioriEstimationsLocal.segment(0,3);
             double clockError = aPrioriEstimationsLocal(3)/lightConstant;
-//            double clockError = 0;
-            Eigen::MatrixXd matrixje = Eigen::MatrixXd::Zero( numberOfObservations, localMatrixSize );
-            Eigen::MatrixXd matrixje2 = Eigen::MatrixXd::Zero( numberOfObservations, numberOfBiases );
+//            double clockError = 0; // Option for estimating no clock
+//            Eigen::MatrixXd matrixje = Eigen::MatrixXd::Zero( numberOfObservations, localMatrixSize ); // Some print verification function
+//            Eigen::MatrixXd matrixje2 = Eigen::MatrixXd::Zero( numberOfObservations, numberOfBiases ); // Some print verification function
 
+            // Loop over observations
             for( int prn = 0; prn < numberOfObservations; prn++)
             {
                 if( availabilityRow( prn ) == 1 )
                 {
+                    // Determine current bias number
                     int biasNumberLocal = biasNumbers( epoch, prn );
-
+                    // Determine correct epoch time to receive correct state from ephemeris
                     double correctedEpochTime = epochTime - clockError;
                     if( lighttimeCorrection ){ correctedEpochTime = epochTime - clockError - travelTimes[ prn ]; }
                     Eigen::Vector3d currentGNSSPosition = satelliteEphemerisGNSS.at( static_cast<unsigned>( prn ) )->getCartesianState( correctedEpochTime ).segment( 0, 3 );
+
                     if( ephemerisError )
                     {
+                        // Determine ephemeris arc number
                         int arcNumber = floor(epochTime/arcTime);
-                        double arcEpochTime = floor(epochTime/arcTime)*arcTime; // DEZE
-                        double arcPropagationTime = correctedEpochTime - arcEpochTime; // DEZE
+                        double arcEpochTime = floor(epochTime/arcTime)*arcTime;
+                        double arcPropagationTime = correctedEpochTime - arcEpochTime;
                         double maxErrorSMA = ephemerisErrorBase( arcNumber, prn );
-                        double errorSMA = maxErrorSMA; //or maxErrorSMA/arcTime*arcPropagationTime;
-                        double earthGravitationalParameter = 3.986004418e14; // DEZE
-    //                    std::cout << "arcNumber: " << arcNumber << ", arcEpochTime: " << arcEpochTime << ", epochTime: " << epochTime << ", errorSMA: " << errorSMA << std::endl;
-    //                    std::cout << "maxErrorSMA: " << maxErrorSMA << ", arcTime: " << arcTime << ", arcPropagationTime: " << arcPropagationTime << ", errorSMA: " << errorSMA << std::endl;
+                        double errorSMA = maxErrorSMA;
+                        double earthGravitationalParameter = 3.986004418e14;
 
-                        // Correct method
+                        // Obtain state at start ephemeris error and propagate Kepler orbit to receive perturbed state at epoch
                         Eigen::Vector6d arcBeginStateCart = satelliteEphemerisGNSS.at(static_cast<unsigned>(prn))->getCartesianState( arcEpochTime );
                         Eigen::Vector6d arcBeginStateKep = orbital_element_conversions::convertCartesianToKeplerianElements(arcBeginStateCart, earthGravitationalParameter);
                         arcBeginStateKep(0) += errorSMA;
@@ -719,67 +715,63 @@ Eigen::VectorXd getKinematicIterationSmart(
                         currentGNSSPosition = arcPropagatedStateCart.segment(0,3);
                     }
 
+                    // Pre-allocate observation row for design matrix
                     Eigen::RowVectorXd observationRow = Eigen::RowVectorXd::Zero( localMatrixSize );
+                    // Determine part of computed range
                     Eigen::Vector3d positionDifference = aPrioriPosition - currentGNSSPosition;
                     double clockErrorLink = 0.0;
                     codeWeight = codeWeightGNSS;
                     phaseWeight = phaseWeightGNSS;
                     if( prn >= numberOfGNSS )
                     {
+                        // If ISL, determine partial derivatives for other LPS satellite and set correct weights
                         codeWeight = codeWeightISL;
                         phaseWeight = phaseWeightISL;
                         int otherUserIndex = prn-numberOfGNSS;
                         positionDifference = aPrioriPosition - aPrioriEstimations.segment( epoch*localMatrixSize + otherUserIndex*4, 3 );
+                        // Set partial derivatives wrt other LPS sat in observation row
                         observationRow.segment( otherUserIndex*4, 4 ) << -positionDifference.transpose() / positionDifference.norm(), -1;
                         clockErrorLink = -aPrioriEstimations( epoch * numberOfUsers * 4 + otherUserIndex*4+3 );
 
+                        // Set values in bias-state matrices
                         Nxb.coeffRef( epoch*localMatrixSize + otherUserIndex*4 + 0, biasNumberLocal - 1 ) += -observationRow( otherUserIndex*4 + 0) * phaseWeight;
                         Nxb.coeffRef( epoch*localMatrixSize + otherUserIndex*4 + 1, biasNumberLocal - 1 ) += -observationRow( otherUserIndex*4 + 1) * phaseWeight;
                         Nxb.coeffRef( epoch*localMatrixSize + otherUserIndex*4 + 2, biasNumberLocal - 1 ) += -observationRow( otherUserIndex*4 + 2) * phaseWeight;
                         Nxb.coeffRef( epoch*localMatrixSize + otherUserIndex*4 + 3, biasNumberLocal - 1 ) += -observationRow( otherUserIndex*4 + 3) * phaseWeight;
                     }
 
+                    // Set partial derivatives wrt current LPS sat in observation row
                     observationRow.segment( userIndex*4, 4) << positionDifference.transpose()/positionDifference.norm(), 1;
-//                    std::cout << "observation row " << epoch << ", " << userIndex << ", " << prn << ": \n" << observationRow << std::endl;
-                    matrixje.block(prn, 0, 1, localMatrixSize) = observationRow;
-                    matrixje2(prn, biasNumberLocal-1) = -1;
+//                    matrixje.block(prn, 0, 1, localMatrixSize) = observationRow; // Some print verification functions
+//                    matrixje2(prn, biasNumberLocal-1) = -1; // Some print verification functions
 
                     // Find mode code and phase data, and add to model vector
                     double model_phase = positionDifference.norm() + aPrioriEstimationsLocal(3) + clockErrorLink - aPrioriEstimations( matrixSize + biasNumberLocal - 1 ); // model for phase
                     double model_pseudorange = positionDifference.norm() + aPrioriEstimationsLocal(3) + clockErrorLink; // model for pseudo range
-//                    double model_phase = positionDifference.norm() - aPrioriEstimationsLocal(3) - clockErrorLink + aPrioriEstimations( matrixSize + biasNumberLocal - 1 ); // model for phase
-//                    double model_pseudorange = positionDifference.norm() - aPrioriEstimationsLocal(3) - clockErrorLink; // model for pseudo range
 
                     // Build onto error matrices
                     nx.segment( epoch*localMatrixSize, localMatrixSize ) += observationRow * codeWeight * ( rangeData[ userSatellite ][ epochTime ][ prn ] - model_pseudorange );
                     nx.segment( epoch*localMatrixSize, localMatrixSize ) += observationRow * phaseWeight * ( phaseData[ userSatellite ][ epochTime ][ prn ] - model_phase );
                     nb( biasNumberLocal - 1 ) += -1 * phaseWeight * ( phaseData[ userSatellite ][ epochTime ][ prn ] - model_phase );
-//                    nb( biasNumberLocal - 1 ) += -1 * phaseWeight * ( phaseData[ userSatellite ][ epochTime ][ prn ] - model_phase ) + pow( 100, -2.0 )*aPrioriEstimations( matrixSize + biasNumberLocal - 1 )/apriBias(biasNumberLocal-1);
-//                    nb( biasNumberLocal - 1 ) += 1 * phaseWeight * ( phaseData[ userSatellite ][ epochTime ][ prn ] - model_phase );
 
                     // Build onto normal equation matrices
                     NxxLocal += ( observationRow.transpose() * observationRow ) * ( phaseWeight + codeWeight );
                     Nbb.coeffRef( biasNumberLocal - 1, biasNumberLocal - 1 ) += phaseWeight;
-//                    Nbb.coeffRef( biasNumberLocal - 1, biasNumberLocal - 1 ) += phaseWeight + pow( 100, -2.0 );
-//                    Nbb.coeffRef( biasNumberLocal - 1, biasNumberLocal - 1 ) += -phaseWeight;
                     Nxb.coeffRef( epoch*localMatrixSize + userIndex*4 + 0, biasNumberLocal - 1 ) += -observationRow( userIndex*4 + 0) * phaseWeight;
                     Nxb.coeffRef( epoch*localMatrixSize + userIndex*4 + 1, biasNumberLocal - 1 ) += -observationRow( userIndex*4 + 1) * phaseWeight;
                     Nxb.coeffRef( epoch*localMatrixSize + userIndex*4 + 2, biasNumberLocal - 1 ) += -observationRow( userIndex*4 + 2) * phaseWeight;
                     Nxb.coeffRef( epoch*localMatrixSize + userIndex*4 + 3, biasNumberLocal - 1 ) += -observationRow( userIndex*4 + 3) * phaseWeight;
                 }
             }
-//            writeMatrixToFile( matrixje, "Hxx_"+std::to_string(epoch)+"_"+std::to_string(userIndex)+".dat", 16, "C:/tudatBundle/tudatApplications/stepTwo/SimulationOutput/matrices");
-//            writeMatrixToFile( matrixje, "Hxx_"+std::to_string(userIndex)+"_"+std::to_string(epoch)+".dat", 16, "C:/tudatBundle/tudatApplications/pecmeoLPS/SimulationOutput/matrices");
-//            writeMatrixToFile( matrixje2, "Hbb_"+std::to_string(userIndex)+"_"+std::to_string(epoch)+".dat", 16, "C:/tudatBundle/tudatApplications/pecmeoLPS/SimulationOutput/matrices");
+//            writeMatrixToFile( matrixje, "Hxx_"+std::to_string(epoch)+"_"+std::to_string(userIndex)+".dat", 16, "C:/tudatBundle/tudatApplications/stepTwo/SimulationOutput/matrices"); // Some print verification functions
+//            writeMatrixToFile( matrixje, "Hxx_"+std::to_string(userIndex)+"_"+std::to_string(epoch)+".dat", 16, "C:/tudatBundle/tudatApplications/pecmeoLPS/SimulationOutput/matrices"); // Some print verification functions
+//            writeMatrixToFile( matrixje2, "Hbb_"+std::to_string(userIndex)+"_"+std::to_string(epoch)+".dat", 16, "C:/tudatBundle/tudatApplications/pecmeoLPS/SimulationOutput/matrices"); // Some print verification functions
             userIndex += 1;
         }
-//        std::cout << "Looping users is done, starting inverting of Nxx local" << std::endl; getCurrentTime();
 
         // Inverse the local Nxx for faster inversion
         Eigen::MatrixXd NxxLocal_inv( localMatrixSize, localMatrixSize );
         NxxLocal_inv = NxxLocal.inverse(); // Inverse of local N_XX 4x4 or 36x36 matrix
-//        std::cout << "\nEpoch "<<epoch<<" NxxLocal: \n" << NxxLocal << std::endl;
-//        std::cout << "The inverse of local: \n" << NxxLocal_inv << std::endl;
         for( int i = 0; i < localMatrixSize; i++ )
         {
             for( int j = 0; j < localMatrixSize; j++ )
@@ -788,50 +780,39 @@ Eigen::VectorXd getKinematicIterationSmart(
                 Nxx_.coeffRef( epoch*localMatrixSize + i, epoch*localMatrixSize + j ) = NxxLocal( i, j );
             }
         }
-//        std::cout << "Nxx local inverted" << std::endl;
     }
-//    std::cout << "Looping done, starting with sparse computations" << std::endl; getCurrentTime();
 
 
     // Bias and Position updates
-    std::cout << "calculation" << std::endl; getCurrentTime();
-//    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double> > solver;//SparseQR
-//    Eigen::SparseQR< Eigen::SparseMatrix<double>, Eigen::COLAMDOrdering<int> > solver;//SparseQR
-    Eigen::SparseQR< Eigen::SparseMatrix<double>, Eigen::AMDOrdering<int> > solver;//SparseQR
-//    Eigen::SparseQR< Eigen::SparseMatrix<double>, Eigen::NaturalOrdering<int> > solver;//SparseQR
+//    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double> > solver; // Other solver options
+//    Eigen::SparseQR< Eigen::SparseMatrix<double>, Eigen::COLAMDOrdering<int> > solver; // Other solver options
+    Eigen::SparseQR< Eigen::SparseMatrix<double>, Eigen::AMDOrdering<int> > solver; // SparseQr
+//    Eigen::SparseQR< Eigen::SparseMatrix<double>, Eigen::NaturalOrdering<int> > solver;/ // Other solver options
     solver.compute( Nbb - Nxb.transpose() * Nxx_inv * Nxb );
-//    auto perk = solver.compute( Nbb - Nxb.transpose() * Nxx_inv * Nxb );
-//    std::cout << "inversion done" << std::endl; getCurrentTime();
     Eigen::VectorXd deltaB = solver.solve( nb - Nxb.transpose() * Nxx_inv * nx );
-//    std::cout << "delta b done" << std::endl; getCurrentTime();
     Eigen::VectorXd deltaX = Nxx_inv * ( nx - Nxb * deltaB );
-//    std::cout << "delta x done" << std::endl; getCurrentTime();
     Eigen::VectorXd correction( deltaB.size() + deltaX.size() );
     correction << deltaX, deltaB;
     Eigen::VectorXd estimation = aPrioriEstimations + correction;
 
-    // Create covariance matrices /// dit duurt lang?
-//    std::cout << "covariance" << std::endl; getCurrentTime();
-////    Eigen::SparseMatrix<double> Qbb( numberOfBiases, numberOfBiases );
+    #define FOLDINGSTART { // Create covariance matrices // This takes extremely long
+//    Eigen::SparseMatrix<double> Qbb( numberOfBiases, numberOfBiases );
 //    Eigen::MatrixXd Qbb( numberOfBiases, numberOfBiases );
 //    Eigen::SparseMatrix<double> Ibb( numberOfBiases, numberOfBiases );
 //    Ibb.setIdentity();
 //    Qbb = solver.solve( Ibb );
-////    Eigen::SparseMatrix<double> Qxx( matrixSize, matrixSize );
+//    Eigen::SparseMatrix<double> Qxx( matrixSize, matrixSize );
 //    Eigen::MatrixXd Qxx( matrixSize, matrixSize );
 //    Qxx = ( Nxx_inv * Nxb ) * Qbb * ( Nxx_inv * Nxb ).transpose();
 //    Qxx += Nxx_inv;
 //    Eigen::VectorXd QxxDiag = Qxx.diagonal();
 //    std::cout << "covariance done" << std::endl; getCurrentTime();
+    #define FOLDINGEND }
 
-//    std::cout << "Hier straks de covariance matrix etc uitprinten en narekenen met weinig epochs" << std::endl;
-//    std::cout << "Nbb: \n" << Nbb << std::endl;
-//    std::cout << "Nxx_inv: \n" << Nxx_inv << std::endl;
-//    std::cout << "Estimation:" << estimation.segment(0,4).transpose() << std::endl;
-
-    if( numberOfUsers > 1 ){
+    if( numberOfUsers > 0 ){ // Options for printing and saving intermediate results
+    #define FOLDINGSTART { // Saving results
 //        writeMatrixToFile( aPrioriEstimations, "apri_"+setting+"_"+std::to_string(iteration)+".dat", 16, "C:/tudatBundle/tudatApplications/stepTwo/SimulationOutput/matrices");
-        writeMatrixToFile( Eigen::MatrixXd(Nxx_), "Nxx_20m.dat", 16, "C:/tudatBundle/tudatApplications/pecmeoLPS/SimulationOutput/matrices");
+//        writeMatrixToFile( Eigen::MatrixXd(Nxx_), "Nxx_20m.dat", 16, "C:/tudatBundle/tudatApplications/pecmeoLPS/SimulationOutput/matrices");
 //        writeMatrixToFile( Eigen::MatrixXd(Nxb), "Nxb_10m.dat", 16, "C:/tudatBundle/tudatApplications/pecmeoLPS/SimulationOutput/matrices");
 //        writeMatrixToFile( Eigen::MatrixXd(Nxb.transpose()), "NxbT_10m.dat", 16, "C:/tudatBundle/tudatApplications/pecmeoLPS/SimulationOutput/matrices");
 //        writeMatrixToFile( Eigen::MatrixXd(Nbb), "Nbb_10m.dat", 16, "C:/tudatBundle/tudatApplications/pecmeoLPS/SimulationOutput/matrices");
@@ -841,13 +822,17 @@ Eigen::VectorXd getKinematicIterationSmart(
 //        writeMatrixToFile( deltaX, "deltaX_"+setting+"_"+std::to_string(iteration)+".dat", 16, "C:/tudatBundle/tudatApplications/stepTwo/SimulationOutput/matrices");
 //        writeMatrixToFile( estimation, "estimation_"+setting+"_"+std::to_string(iteration)+".dat", 16, "C:/tudatBundle/tudatApplications/stepTwo/SimulationOutput/matrices");
 //        writeMatrixToFile( QxxDiag, "QxxDiag.dat", 16, "C:/tudatBundle/tudatApplications/stepTwo/SimulationOutput/PECMEO_30sec/GalileoGLONASSBeiDouGPS/1d/GNSSISL");
+    #define FOLDINGEND }
 
+    #define FOLDINGSTART { // Condition number
 //        Eigen::JacobiSVD<Eigen::MatrixXd> svd(Nxx_);
 //        double cond = svd.singularValues()(0) / svd.singularValues()(svd.singularValues().size()-1);
 //        std::cout << "With code weight " << codeWeightISL << " condition number: " << cond << std::endl;
 //        std::cout << "With code: " << pow( codeWeightISL, -0.5 ) << " and weight " << codeWeightISL << " op epoch: " << epochTime << " condition number: " << cond << std::endl;
 //        if( cond > codeWeightISL/1.0e5 ){ std::cout << "Maybe" << std::endl; }
+    #define FOLDINGEND }
 
+    #define FOLDINGSTART { // Printing stuff
         std::cout << "\napriori: \n" << aPrioriEstimations.segment(0,36).transpose() << std::endl;
 //        std::cout << "\nnb: \n" << nb.segment(0,16).transpose() << std::endl;
 //        std::cout << "\nnx: \n" << nx.segment(0,16).transpose() << std::endl;
@@ -866,6 +851,7 @@ Eigen::VectorXd getKinematicIterationSmart(
 //        std::cout << "Nxx_inv: \n" << Eigen::MatrixXd(Nxx_inv) << std::endl;
 //        std::cout << "Qxx: \n" << Qxx << std::endl;
 //        std::cout << "QxxDiag: \n" << QxxDiag.transpose() << std::endl;
+    #define FOLDINGEND }
     }
 
     return estimation;
@@ -898,7 +884,7 @@ Eigen::VectorXd getKinematicIterationPhase(
     int numberOfGNSS = numberOfSatellites - numberOfUsers;
     int numberOfUnknowns = 3; //4;
     int localMatrixSize = numberOfUsers * numberOfUnknowns + 1; //numberOfUsers*4;
-//    int localMatrixSize = numberOfUsers * numberOfUnknowns; // NO CLOCK
+//    int localMatrixSize = numberOfUsers * numberOfUnknowns; // NO CLOCK OPTION
     int matrixSize = numberOfEpochs * localMatrixSize; //numberOfEpochs*numberOfUsers*4;
     double codeWeightGNSS = codeWeight;
     double phaseWeightGNSS = phaseWeight;
@@ -951,49 +937,51 @@ Eigen::VectorXd getKinematicIterationPhase(
     }
 
     // Loop over all the epochs
-//    std::cout << "Start loop over epochs" << std::endl; getCurrentTime();
     for( int epoch = 0; epoch < numberOfEpochs; epoch++ )
     {
+        // Pre-allocate sub-matrix corresponding to current epoch.
         Eigen::MatrixXd NxxLocal = Eigen::MatrixXd::Zero( localMatrixSize, localMatrixSize );
         double epochTime = epochTimes.at(static_cast<unsigned>(epoch));
         int userIndex = 0;
-//        std::cout << " Start loop over users bij epoch nummer " << epoch << " met tijd " << epochTime << std::endl;
+
+        // Loop over different users
         for( std::map< std::string, Eigen::MatrixXi >::iterator itrUser = availabilityMatrixPerUser.begin(); itrUser != availabilityMatrixPerUser.end(); itrUser++ )
         {
+            // Set current users, corresponing bias numbers and travel times
             std::string userSatellite = itrUser->first;
             Eigen::RowVectorXi availabilityRow = itrUser->second.row( epoch );
             auto numberOfObservations = availabilityRow.size();
-
             Eigen::MatrixXi biasNumbers = biasNumbersPerUser[ userSatellite ];
-
             std::map< int, double > travelTimes = travelTimesPerUserPerEpoch[ userSatellite ][ epochTime ];
 
+            // Determine the a priori state for current user and epoch
             Eigen::VectorXd aPrioriEstimationsLocal = aPrioriEstimations.segment( epoch*localMatrixSize + userIndex*numberOfUnknowns, numberOfUnknowns );
             Eigen::Vector3d aPrioriPosition = aPrioriEstimationsLocal.segment(0,3);
             double clockError = aPrioriEstimations( epoch * localMatrixSize + localMatrixSize - 1 ) / lightConstant;
-//            double clockError = 0; // NO CLOCK
+//            double clockError = 0; // NO CLOCK OPTION
 
+            // Loop over observations
             for( int prn = 0; prn < numberOfObservations; prn++)
             {
                 if( availabilityRow( prn ) == 1 )
                 {
+                    // Determine current bias number
                     int biasNumberLocal = biasNumbers( epoch, prn );
-
+                    // Determine correct epoch time to receive correct state from ephemeris
                     double correctedEpochTime = epochTime - clockError;
                     if( lighttimeCorrection ){ correctedEpochTime = epochTime - clockError - travelTimes[ prn ]; }
                     Eigen::Vector3d currentGNSSPosition = satelliteEphemerisGNSS.at( static_cast<unsigned>( prn ) )->getCartesianState( correctedEpochTime ).segment( 0, 3 );
                     if( ephemerisError )
                     {
+                        // Determine ephemeris arc number
                         int arcNumber = floor(epochTime/arcTime);
-                        double arcEpochTime = floor(epochTime/arcTime)*arcTime; // DEZE
-                        double arcPropagationTime = correctedEpochTime - arcEpochTime; // DEZE
+                        double arcEpochTime = floor(epochTime/arcTime)*arcTime;
+                        double arcPropagationTime = correctedEpochTime - arcEpochTime;
                         double maxErrorSMA = ephemerisErrorBase( arcNumber, prn );
-                        double errorSMA = maxErrorSMA; //or maxErrorSMA/arcTime*arcPropagationTime;
-                        double earthGravitationalParameter = 3.986004418e14; // DEZE
-    //                    std::cout << "arcNumber: " << arcNumber << ", arcEpochTime: " << arcEpochTime << ", epochTime: " << epochTime << ", errorSMA: " << errorSMA << std::endl;
-    //                    std::cout << "maxErrorSMA: " << maxErrorSMA << ", arcTime: " << arcTime << ", arcPropagationTime: " << arcPropagationTime << ", errorSMA: " << errorSMA << std::endl;
+                        double errorSMA = maxErrorSMA;
+                        double earthGravitationalParameter = 3.986004418e14;
 
-                        // Correct method
+                        // Obtain state at start ephemeris error and propagate Kepler orbit to receive perturbed state at epoch
                         Eigen::Vector6d arcBeginStateCart = satelliteEphemerisGNSS.at(static_cast<unsigned>(prn))->getCartesianState( arcEpochTime );
                         Eigen::Vector6d arcBeginStateKep = orbital_element_conversions::convertCartesianToKeplerianElements(arcBeginStateCart, earthGravitationalParameter);
                         arcBeginStateKep(0) += errorSMA;
@@ -1003,35 +991,40 @@ Eigen::VectorXd getKinematicIterationPhase(
                         currentGNSSPosition = arcPropagatedStateCart.segment(0,3);
                     }
 
+                    // Pre-allocate observation row for design matrix
                     Eigen::RowVectorXd observationRow = Eigen::RowVectorXd::Zero( localMatrixSize );
                     observationRow( localMatrixSize - 1 ) = 1; // Comment out for NO CLOCK
+                    // Determine part of computed range
                     Eigen::Vector3d positionDifference = aPrioriPosition - currentGNSSPosition;
                     double clockErrorLink = 0.0;
                     codeWeight = codeWeightGNSS;
                     phaseWeight = phaseWeightGNSS;
                     if( prn >= numberOfGNSS )
                     {
+                        // If ISL, determine partial derivatives for other LPS satellite and set correct weights
                         codeWeight = codeWeightISL;
-                        phaseWeight = phaseWeightISL; //0;//
+                        phaseWeight = phaseWeightISL;
                         int otherUserIndex = prn-numberOfGNSS;
                         positionDifference = aPrioriPosition - aPrioriEstimations.segment( epoch*localMatrixSize + otherUserIndex*numberOfUnknowns, 3 );
+                        // Set partial derivatives wrt other LPS sat in observation row
                         observationRow.segment( otherUserIndex*numberOfUnknowns, numberOfUnknowns ) << -positionDifference.transpose() / positionDifference.norm();
                         observationRow( localMatrixSize - 1 ) = 0; // Comment out for NO CLOCK // testline
                         clockErrorLink = -aPrioriEstimations( epoch * localMatrixSize + localMatrixSize - 1 );
 
+                        // Set values in bias-state matrices
                         Nxb.coeffRef( epoch*localMatrixSize + otherUserIndex*numberOfUnknowns + 0, biasNumberLocal - 1 ) += -observationRow( otherUserIndex*numberOfUnknowns + 0) * phaseWeight;
                         Nxb.coeffRef( epoch*localMatrixSize + otherUserIndex*numberOfUnknowns + 1, biasNumberLocal - 1 ) += -observationRow( otherUserIndex*numberOfUnknowns + 1) * phaseWeight;
                         Nxb.coeffRef( epoch*localMatrixSize + otherUserIndex*numberOfUnknowns + 2, biasNumberLocal - 1 ) += -observationRow( otherUserIndex*numberOfUnknowns + 2) * phaseWeight;
                     }
 
+                    // Set partial derivatives wrt current LPS sat in observation row
                     observationRow.segment( userIndex*numberOfUnknowns, numberOfUnknowns ) << positionDifference.transpose()/positionDifference.norm();
-//                    std::cout << "Observation row: \n" << observationRow << std::endl;
 
                     // Find mode code and phase data, and add to model vector
                     double model_phase = positionDifference.norm() + aPrioriEstimations( epoch * localMatrixSize + localMatrixSize - 1 ) + clockErrorLink - aPrioriEstimations( matrixSize + biasNumberLocal - 1 ); // model for phase
                     double model_pseudorange = positionDifference.norm() + aPrioriEstimations( epoch * localMatrixSize + localMatrixSize - 1 ) + clockErrorLink; // model for pseudo range
-//                    double model_phase = positionDifference.norm() - aPrioriEstimations( matrixSize + biasNumberLocal - 1 ); // model for phase NO CLOCK
-//                    double model_pseudorange = positionDifference.norm(); // model for pseudo range NO CLOCK
+//                    double model_phase = positionDifference.norm() - aPrioriEstimations( matrixSize + biasNumberLocal - 1 ); // model for phase NO CLOCK OPTION
+//                    double model_pseudorange = positionDifference.norm(); // model for pseudo range NO CLOCK OPTION
 
                     // Build onto error matrices
                     nx.segment( epoch*localMatrixSize, localMatrixSize ) += observationRow * codeWeight * ( rangeData[ userSatellite ][ epochTime ][ prn ] - model_pseudorange );
@@ -1049,7 +1042,6 @@ Eigen::VectorXd getKinematicIterationPhase(
             }
             userIndex += 1;
         }
-//        std::cout << "Looping users is done, starting inverting of Nxx local" << std::endl; getCurrentTime();
 
         // Inverse the local Nxx for faster inversion
         Eigen::MatrixXd NxxLocal_inv( localMatrixSize, localMatrixSize );
@@ -1061,16 +1053,13 @@ Eigen::VectorXd getKinematicIterationPhase(
                 Nxx_inv.coeffRef( epoch*localMatrixSize + i, epoch*localMatrixSize + j ) = NxxLocal_inv( i, j );
             }
         }
-
-//        std::cout << "Nxx local inverted" << std::endl;
     }
 
-//    std::cout << "Looping done, starting with sparse computations" << std::endl; getCurrentTime();
     // Bias and Position updates
-//    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double> > solver;
-//    Eigen::SparseQR< Eigen::SparseMatrix<double>, Eigen::COLAMDOrdering<int> > solver;//SparseQR
-    Eigen::SparseQR< Eigen::SparseMatrix<double>, Eigen::AMDOrdering<int> > solver;//SparseQR
-//    Eigen::SparseQR< Eigen::SparseMatrix<double>, Eigen::NaturalOrdering<int> > solver;//SparseQR
+//    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double> > solver; // Other solver options
+//    Eigen::SparseQR< Eigen::SparseMatrix<double>, Eigen::COLAMDOrdering<int> > solver; // Other solver options
+    Eigen::SparseQR< Eigen::SparseMatrix<double>, Eigen::AMDOrdering<int> > solver; // SparseQR
+//    Eigen::SparseQR< Eigen::SparseMatrix<double>, Eigen::NaturalOrdering<int> > solver; // Other solver options
     solver.compute( Nbb - Nxb.transpose() * Nxx_inv * Nxb );
     Eigen::VectorXd deltaB = solver.solve( nb - Nxb.transpose() * Nxx_inv * nx );
     Eigen::VectorXd deltaX = Nxx_inv * ( nx - Nxb * deltaB );
@@ -1078,17 +1067,17 @@ Eigen::VectorXd getKinematicIterationPhase(
     correction << deltaX, deltaB;
     Eigen::VectorXd estimation = aPrioriEstimations + correction;
 
-    // Create covariance matrices /// dt duurt lang?
-//    Eigen::SparseMatrix<double> Qbb( numberOfBiases, numberOfBiases );
+    #define FOLDINGSTART { // Create covariance matrices // This takes extremely long//    Eigen::SparseMatrix<double> Qbb( numberOfBiases, numberOfBiases );
 //    Eigen::SparseMatrix<double> Ibb( numberOfBiases, numberOfBiases );
 //    Ibb.setIdentity();
 //    Qbb = solver.solve( Ibb );
 //    Eigen::SparseMatrix<double> Qxx( matrixSize, matrixSize );
 //    Qxx = ( Nxx_inv * Nxb ) * Qbb * ( Nxx_inv * Nxb ).transpose();
 //    Qxx = Nxx_inv + Qxx;
-//    std::cout << "Hier straks de covariance matrix etc uitprinten en narekenen met weinig epochs" << std::endl;
+#define FOLDINGEND }
 
-    if( numberOfUsers > 0 ){
+    if( numberOfUsers > 0 ){ // Options for printing and saving intermediate results
+        #define FOLDINGSTART { // Saving results
 //        std::cout << "Nxx inv: \n" << Nxx_inv << std::endl;
 //        std::cout << "Nxx inv: \n" << Eigen::MatrixXd(Nxx_inv) << std::endl;
 //        writeMatrixToFile( aPrioriEstimations, "apri_"+setting+"_"+std::to_string(iteration)+".dat", 16, "C:/tudatBundle/tudatApplications/stepTwo/SimulationOutput/Nxx");
@@ -1100,7 +1089,16 @@ Eigen::VectorXd getKinematicIterationPhase(
 //        writeMatrixToFile( deltaB, "deltaB_"+setting+"_"+std::to_string(iteration)+".dat", 16, "C:/tudatBundle/tudatApplications/stepTwo/SimulationOutput/Nxx");
 //        writeMatrixToFile( deltaX, "deltaX_"+setting+"_"+std::to_string(iteration)+".dat", 16, "C:/tudatBundle/tudatApplications/stepTwo/SimulationOutput/Nxx");
 //        writeMatrixToFile( estimation, "estimation_"+setting+"_"+std::to_string(iteration)+".dat", 16, "C:/tudatBundle/tudatApplications/stepTwo/SimulationOutput/Nxx");
+    #define FOLDINGEND }
 
+        #define FOLDINGSTART { // Condition number
+//            Eigen::JacobiSVD<Eigen::MatrixXd> svd(normalMatrix);
+//            double cond = svd.singularValues()(0) / svd.singularValues()(svd.singularValues().size()-1);
+//            std::cout << "With code: " << pow( codeWeightISL, -0.5 ) << " and weight " << codeWeightISL << " op epoch: " << epochTime << " condition number: " << cond << std::endl;
+//            if( cond > codeWeightISL/1.0e5 ){ std::cout << "Maybe" << std::endl; }
+        #define FOLDINGEND }
+
+        #define FOLDINGSTART { // Printing stuff
         std::cout << "\napriori: \n" << aPrioriEstimations.segment(0,28).transpose() << std::endl;
 //        std::cout << "\nnb: \n" << nb.segment(0,16).transpose() << std::endl;
 //        std::cout << "\nnx: \n" << nx.segment(0,16).transpose() << std::endl;
@@ -1112,14 +1110,7 @@ Eigen::VectorXd getKinematicIterationPhase(
 //        std::cout << "\ndeltaX: \n" << deltaX.segment(0,16).transpose() << std::endl;
         std::cout << "\nestimation: \n" << estimation.segment(0,28).transpose() << std::endl;
         std::cout << "\nbias: \n" << estimation.tail(numberOfBiases).segment(0,12).transpose() << std::endl;
-    }
-
-    if( numberOfUsers > 1 )
-    {
-//        Eigen::JacobiSVD<Eigen::MatrixXd> svd(normalMatrix);
-//        double cond = svd.singularValues()(0) / svd.singularValues()(svd.singularValues().size()-1);
-//        std::cout << "With code: " << pow( codeWeightISL, -0.5 ) << " and weight " << codeWeightISL << " op epoch: " << epochTime << " condition number: " << cond << std::endl;
-//        if( cond > codeWeightISL/1.0e5 ){ std::cout << "Maybe" << std::endl; }
+        #define FOLDINGEND }
     }
 
     return estimation;
@@ -1158,12 +1149,11 @@ std::map< std::string, std::map< double, Eigen::Vector4d > > getKinematicEstimat
     {
         numberOfUnknowns = 3;
         localMatrixSize = numberOfUsers * numberOfUnknowns + 1;
-//        localMatrixSize = numberOfUsers * numberOfUnknowns; // NO CLOCK ESTIMATION
+//        localMatrixSize = numberOfUsers * numberOfUnknowns; // NO CLOCK ESTIMATION OPTION
     }
     int matrixSize = numberOfEpochs * localMatrixSize; //numberOfEpochs*numberOfUsers*numberOfUnknowns;
 
     // Create a vector for the a priori estimations and establish bias number matrices for all users
-//    Eigen::VectorXd aPrioriEstimations( numberOfEpochs * numberOfUsers * 4 );
     Eigen::VectorXd aPrioriEstimations = Eigen::VectorXd::Zero( matrixSize );
     std::map< std::string, Eigen::MatrixXi > biasNumbersPerUser;
     int userIndex = 0;
@@ -1185,8 +1175,7 @@ std::map< std::string, std::map< double, Eigen::Vector4d > > getKinematicEstimat
             estimationsKinPerUserPerIteration[ 0 ][ userSatellite ][ epochTime ] = aPrioriPerUser[ userSatellite ][ epochTime ].segment(0, numberOfUnknowns);
             if( clockPhase ){
                 aPrioriEstimations( epoch*localMatrixSize + localMatrixSize - 1 ) += aPrioriPerUser[ userSatellite ][ epochTime ]( numberOfUnknowns )/numberOfUsers; // Comment out for NO CLOCK
-//                aPrioriEstimations( epoch*localMatrixSize + localMatrixSize - 1 ) += 0; // Comment out for NO CLOCK
-//                std::cout << "Esti: " << aPrioriEstimations.transpose() << "\nand clock: " <<  aPrioriPerUser[ userSatellite ][ epochTime ]( numberOfUnknowns )/numberOfUsers << std::endl;
+//                aPrioriEstimations( epoch*localMatrixSize + localMatrixSize - 1 ) += 0; // Uncomment for NO CLOCK
             }
 
             // Allocate bias numbers
@@ -1214,10 +1203,7 @@ std::map< std::string, std::map< double, Eigen::Vector4d > > getKinematicEstimat
     double correction = correctionLimitKinematic * 10;
     int numberOfBiases = previousBiasNumber;
     Eigen::VectorXd kinematicEstimation = aPrioriEstimations;
-//    std::cout << "hier: " << kinematicEstimation.segment(0,16).transpose() << std::endl;
-//    Eigen::MatrixXd iterationHistory(numberOfEpochs * numberOfUsers * 4 + numberOfBiases, 1);
     Eigen::MatrixXd iterationHistory(matrixSize + numberOfBiases, 1);
-//    iterationHistory.block( 0, 0, numberOfEpochs * numberOfUsers * 4, 1 ) = kinematicEstimation;
     iterationHistory.block( 0, 0, matrixSize, 1 ) = kinematicEstimation;
     Eigen::VectorXd kinematicEstimationOld = iterationHistory;    
     while( iteration < maxIterationsKinematic && correction > correctionLimitKinematic )
@@ -1248,6 +1234,7 @@ std::map< std::string, std::map< double, Eigen::Vector4d > > getKinematicEstimat
         correction = estimationDifference.maxCoeff();
         kinematicEstimationOld = kinematicEstimation;
 
+        // Save the itereation history
         iterationHistory.conservativeResize(iterationHistory.rows(), iterationHistory.cols()+1);
         iterationHistory.col(iterationHistory.cols()-1) = kinematicEstimation;
 
@@ -1264,7 +1251,6 @@ std::map< std::string, std::map< double, Eigen::Vector4d > > getKinematicEstimat
             }
         }
     }
-//    std::cout << "  Kinematic estimation completed after " << iteration << " iterations!" << std::endl; getCurrentTime();
 
     // Process results to get estimation results in map and iteration history
     std::map< std::string, std::map< double, Eigen::Vector4d > > estimationsKinPerUser;
@@ -1274,18 +1260,14 @@ std::map< std::string, std::map< double, Eigen::Vector4d > > getKinematicEstimat
         for( long long epoch = 0; epoch < numberOfEpochs; epoch++ )
         {
             double epochTime = epochTimes.at( static_cast<unsigned>(epoch) );
-//            estimationsKinPerUser[ userSatellite ][ epochTime ] = kinematicEstimation.segment( epoch * numberOfUsers * 4 + userIndex * 4, 4 );
             estimationsKinPerUser[ userSatellite ][ epochTime ].segment(0, numberOfUnknowns) = kinematicEstimation.segment( epoch * localMatrixSize + userIndex * numberOfUnknowns, numberOfUnknowns );
             if( clockPhase ){ estimationsKinPerUser[ userSatellite ][ epochTime ](3) = kinematicEstimation( epoch * localMatrixSize + localMatrixSize - 1 ); }
 
-//            Eigen::VectorXd iterationsTemp = iterationHistory.block( epoch * numberOfUsers * 4 + userIndex * 4, 0, 4, 1 );
             Eigen::VectorXd iterationsTemp = iterationHistory.block( epoch * localMatrixSize + userIndex * numberOfUnknowns, 0, numberOfUnknowns, 1 );
             biasIterations[ 0 ] = iterationHistory.col(0).tail(numberOfBiases);
             for( int it = 1; it < iteration+1; it++ )
             {
-//                iterationsTemp.conservativeResize( iterationsTemp.size() + 4 );
                 iterationsTemp.conservativeResize( iterationsTemp.size() + numberOfUnknowns );
-//                iterationsTemp.segment( iterationsTemp.size()-4, 4 ) = iterationHistory.block( epoch*numberOfUsers*4 + userIndex*4, it, 4, 1 );
                 iterationsTemp.segment( iterationsTemp.size()-numberOfUnknowns, numberOfUnknowns ) = iterationHistory.block( epoch*localMatrixSize + userIndex*numberOfUnknowns, it, numberOfUnknowns, 1 );
 
                 biasIterations[ it ] = iterationHistory.col(it).tail(numberOfBiases);
@@ -1293,7 +1275,6 @@ std::map< std::string, std::map< double, Eigen::Vector4d > > getKinematicEstimat
             allUsersKinIterations[ userSatellite ][ epochTime ] = iterationsTemp;
         }
     }
-//    std::cout << "  Results processed!" << std::endl; getCurrentTime();
 
     return estimationsKinPerUser;
 }

@@ -32,7 +32,6 @@ void getBodyMap(
                 Eigen::Vector6d::Zero( ), "SSB", "J2000" );
     bodySettings[ "Earth" ]->rotationModelSettings->resetOriginalFrame( "J2000" );
     bodySettings[ "Earth" ]->atmosphereSettings = NULL;
-//    bodySettings[ "Earth" ]->shapeModelSettings = NULL;
     double earthRadius = 6378.1e3;
     bodySettings[ "Earth" ]->shapeModelSettings = std::make_shared< SphericalBodyShapeSettings >( earthRadius );
 
@@ -56,10 +55,9 @@ void finalizeBodyMap(
     {
         currentSatelliteName = satelliteNames.at( i );
         currentInitialStateInKeplerianElements = initialConditionsInKeplerianElementsTotal.block(0,i,6,1);
-//        std::cout << currentSatelliteName << " has: " << currentInitialStateInKeplerianElements.transpose() << std::endl;
-//        std::cout << currentInitialStateInKeplerianElements(0) << ", " << currentInitialStateInKeplerianElements(1) << ", " << currentInitialStateInKeplerianElements(2) << ", " << currentInitialStateInKeplerianElements(3) << ", " << currentInitialStateInKeplerianElements(4) << ", " << currentInitialStateInKeplerianElements(5) << ", " << std::endl;
 
         bodyMap[ currentSatelliteName ] = std::make_shared< simulation_setup::Body >( );
+        // Option for non Kepler propagation and ephemeris
 //        bodyMap[ currentSatelliteName ]->setEphemeris( std::make_shared< TabulatedCartesianEphemeris< > >(
 //                                                           std::shared_ptr< interpolators::OneDimensionalInterpolator
 //                                                           < double, Eigen::Vector6d > >( ), "Earth", "J2000" ) );
@@ -87,9 +85,7 @@ Eigen::VectorXd getInitialStateVector(
 {
     // Convert initial conditions to Cartesian elements of all constellations at once
     Eigen::MatrixXd initialConditions( 6, numberOfSatellitesTotal ); // For Cartesian initial condition set matrix (6 x # single satellites)
-
     double earthGravitationalParameter = bodyMap.at( "Earth" )->getGravityFieldModel( )->getGravitationalParameter( ); // Kepler to cartesian that is going to be used to propagate
-//    std::cout << "get initial state: " << earthGravitationalParameter << std::endl;
     for ( unsigned int i = 0; i < numberOfSatellitesTotal; i++ )
     {
         Eigen::Vector6d initKepl = initialConditionsInKeplerianElementsTotal.col( i ).cast< double >();
@@ -176,6 +172,7 @@ void getStateHistory (
     allSatellitesPropagationHistory.resize( numberOfSatellitesTotal );
     allSatellitesPropagationHistoryKep.resize( numberOfSatellitesTotal );
 
+    // Create map with all satellite states per epoch, both in Kepler and Cartesian elements
     for( unsigned int sat = 0; sat < numberOfSatellitesTotal; sat++ )
     {
         std::string currentSatellite = satelliteNames.at( sat );
@@ -227,7 +224,8 @@ PodInputDataType observationsAndTimesCalculator(
         }
     }
 
-    if( interSatelliteTracking ) // Add intersatellite tracking to the link ends
+    // Add intersatellite tracking to the link ends
+    if( interSatelliteTracking )
     {
         for( unsigned int i = 0; i < numberOfSatellitesPEC; i++ )
         {
@@ -260,16 +258,15 @@ PodInputDataType observationsAndTimesCalculator(
         {
             linkEndsPerObservable[ one_way_range ].push_back( stationTransmitterLinkEnds[ j + i*numberOfSatellitesGNSS] );
     //        linkEndsPerObservable[ one_way_range ].push_back( stationReceiverLinkEnds[ j + i*numberOfSatellitesGNSS] );
-
 //            linkEndsPerObservable[ one_way_doppler ].push_back( stationTransmitterLinkEnds[ j + i*numberOfSatellitesGNSS] );
-
 
             linkEndsPerObservableGNSS[ one_way_range ].push_back( stationTransmitterLinkEnds[ j + i*numberOfSatellitesGNSS] );
 //            linkEndsPerObservableGNSS[ one_way_doppler ].push_back( stationTransmitterLinkEnds[ j + i*numberOfSatellitesGNSS] );
         }
     }
 
-    if( interSatelliteTracking ) // Add intersatellite tracking to the link ends
+    // Add intersatellite tracking to the link ends
+    if( interSatelliteTracking )
     {
         for( unsigned int i = 0; i < numberOfISLLinks; i++)
         {
@@ -330,6 +327,7 @@ PodInputDataType observationsAndTimesCalculator(
                                                     body_avoidance_angle, std::make_pair( satelliteNames.at( i ), "" ), "Earth", convertDegreesToRadians( 90.0 ) ) ); // PECMEO can only look up
     }
 
+    // Create special observation visibility settings for ISL
     std::vector< std::shared_ptr< ObservationViabilitySettings > > observationViabilitySettingsISL;
     for( unsigned int i = 0; i < numberOfSatellitesPEC; i++ )
     {
@@ -339,6 +337,7 @@ PodInputDataType observationsAndTimesCalculator(
                                                     body_avoidance_angle, std::make_pair( satelliteNames.at( i ), "" ), "Earth", convertDegreesToRadians( 0.0 ) ) ); // PECMEO ISL can look any direction
     }
 
+    // Calculate visibilities
     PerObservableObservationViabilityCalculatorList viabilityCalculators;
     PerObservableObservationViabilityCalculatorList viabilityCalculatorsGNSS = createObservationViabilityCalculators(
                 bodyMap, linkEndsPerObservableGNSS, observationViabilitySettingsGNSS );
@@ -360,6 +359,7 @@ PodInputDataType observationsAndTimesCalculator(
 
 ////////////////////////// PROCESSING OF SIMULATION RESULTS //////////////////////////
 
+// OLD METHOD FOR MEASUREMENT SIMULATION
 //! Obtain measurement data for visible GNSS satellites
 //! for all epochs per user
 std::map< int, std::map< double, Eigen::VectorXd > > getMeasurementData(
@@ -430,7 +430,6 @@ void getMeasurementsAllUsers(
 
     // Adding identifier to satellites for indexing
     std::vector< std::string > satelliteNamesGNSS = satelliteNames;
-//    satelliteNamesGNSS.erase( satelliteNamesGNSS.begin(), satelliteNamesGNSS.begin() + numberOfSatellitesPEC );
     std::rotate( satelliteNamesGNSS.begin(), satelliteNamesGNSS.begin() + numberOfSatellitesPEC, satelliteNamesGNSS.end() );
     unsigned long long numberOfSatellites = satelliteNamesGNSS.size();
     std::map< std::string, int > satelliteIDs;
@@ -440,8 +439,8 @@ void getMeasurementsAllUsers(
         satelliteIDs[ satelliteNamesGNSS.at(j) ] = satelliteID;
 //        std::cout << "Sat name: " << satelliteNamesGNSS.at(j) << " with ID: " << satelliteID << std::endl;
         satelliteID += 1;
-//        std::cout << satelliteNames.at(j) << std::endl;
     }
+    // Set index for ISL
     int firstPECID = numberOfSatellites - numberOfSatellitesPEC;
 
     // Opening the simulated observations object and restructure the data
@@ -489,14 +488,8 @@ void getMeasurementsAllUsers(
     // Creating new epoch times list, which includes all of the epochs.
     epochTimes.clear();
     epochTimes = epochTimesTrue;
-//    for( std::map< double, double >::iterator itrEpoch = completeEpochList.begin();
-//         itrEpoch != completeEpochList.end(); ++itrEpoch)
-//    {
-//        epochTimes.push_back(itrEpoch->first);
-//    }
     numberOfEpochs = epochTimes.size();
     unsigned long long numberOfSatellitesGNSS = satellitesUsedForNavigation.size();
-//    std::cout << satellitesUsedForNavigation.size() << " DIT IS HT" << std::endl;
 
     // Loop over different users
     srand(456);
@@ -506,12 +499,12 @@ void getMeasurementsAllUsers(
         // Current user
 //        std::cout << i << std::endl;
         std::string userSatellite = satelliteNames.at( i );
-//        std::cout << "\n" << userSatellite << std::endl;
+//        std::cout << "\n" << i << ", " << userSatellite << std::endl;
 
         // Create availability matrix for current user
         Eigen::MatrixXi availabilityMatrix = Eigen::MatrixXi::Zero( numberOfEpochs, numberOfSatellitesGNSS );
 
-        // Loop over all epochs
+        // Loop over all epochs to create availability matrix
         for( unsigned int i = 0; i < numberOfEpochs; i++ )
         {
             double epochTime = epochTimes.at( i );
@@ -526,7 +519,6 @@ void getMeasurementsAllUsers(
         availabilityMatrixAllUsers[ userSatellite ] = availabilityMatrix;
 
         // Give errors and deviations
-
 //        std::cout << "stddevCode: " << stddevCode << " & stddevPhase: " << stddevPhase << std::endl;
         std::normal_distribution<double> distributionCode(0.0, stddevCode);
         std::normal_distribution<double> distributionPhase(0.0, stddevPhase);
@@ -534,7 +526,7 @@ void getMeasurementsAllUsers(
         std::normal_distribution<double> distributionPhaseISL(0.0, stddevPhaseISL);
 
         std::map< int, int > currentCarrierAmbiguity;
-        double clockOffSet = (i+1);
+//        double clockOffSet = (i+1); // Template for future option to simulate clock errors
         for( unsigned int i = 0; i < numberOfEpochs; i++ )
         {
             double epochTime = epochTimes.at( i );
@@ -546,7 +538,7 @@ void getMeasurementsAllUsers(
                 int currentSatelliteID = visibleSatelliteIDs.at(j);
 
                 // Check if lighttime correction is used
-                if(!lighttimeCorrection /*|| currentSatelliteID >= firstPECID*/ )
+                if(!lighttimeCorrection)
                 {
                     std::string currentSatellite = satelliteNamesGNSS.at( static_cast<unsigned>(currentSatelliteID) );
 //                    std::cout << "\n" << userSatellite << " and " << currentSatellite << " at " << epochTime << " and travel time: " << travelTimesPerUserPerEpoch[userSatellite][epochTime][currentSatelliteID] << std::endl;
@@ -555,53 +547,25 @@ void getMeasurementsAllUsers(
                     correctedPhasesPerUserPerEpoch[ userSatellite ][ epochTime ][ currentSatelliteID ] = (userSatellitePosition - currentSatellitePosition).norm();
                 }
 
-
-                if( currentSatelliteID >= firstPECID +11)
-                {
-                    std::string currentSatellite = satelliteNamesGNSS.at( static_cast<unsigned>(currentSatelliteID) );
-                    Eigen::Vector3d currentSatellitePosition = satelliteEphemeris[ currentSatellite ]->getCartesianState( epochTime ).segment( 0, 3 );                    
-                    if( (userSatellitePosition - currentSatellitePosition).norm() > 24.924e6 )
-                    {
-                        std::cout << "\n" << userSatellite << " and " << currentSatellite << " at " << epochTime << " and travel time: " << travelTimesPerUserPerEpoch[userSatellite][epochTime][currentSatelliteID] << std::endl;
-                        std::cout << "User position: " << userSatellitePosition.transpose() << std::endl;
-                        std::cout << "GNSS position: " << currentSatellitePosition.transpose() << std::endl;
-                        std::cout << "Corr position: " << satelliteEphemeris[ currentSatellite ]->getCartesianState( epochTime - travelTimesPerUserPerEpoch[userSatellite][epochTime][currentSatelliteID] ).segment( 0, 3 ).transpose() << std::endl;
-                        std::cout << "pseudorange wi ltc: " << correctedRangesPerUserPerEpoch[ userSatellite ][ epochTime ][ currentSatelliteID ] << std::endl;
-                        std::cout << "pseudorange wo ltc: " << (userSatellitePosition - currentSatellitePosition).norm() << std::endl;
-                        std::cout << correctedRangesPerUserPerEpoch[ userSatellite ][ epochTime ][ currentSatelliteID ] - (userSatellitePosition - currentSatellitePosition).norm() << ", ";
-                        std::cout << (userSatellitePosition - currentSatellitePosition).norm() << ", ";
-                    }
-
-                }
-
-
                 // Adjust code measurement
                 double codeError = 0;
                 if(addNoise){ codeError = distributionCode( generator ); }
                 if( addNoise && currentSatelliteID >= firstPECID ){ codeError = distributionCodeISL( generator ); /*std::cout << codeError << ", ";*/ }
                 correctedRangesPerUserPerEpoch[ userSatellite ][ epochTime ][ currentSatelliteID ] += codeError;
-//                correctedRangesPerUserPerEpoch[ userSatellite ][ epochTime ][ currentSatelliteID ] += codeError + clockOffSet;
+//                correctedRangesPerUserPerEpoch[ userSatellite ][ epochTime ][ currentSatelliteID ] += codeError + clockOffSet; // For future option to simulate clock errirs
 
                 // Adjust phase measurement
                 double phaseError = 0;
                 if(addNoise){ phaseError = distributionPhase( generator ); }
-//                std::cout << phaseError << ", ";
                 if( addNoise && currentSatelliteID >= firstPECID ){ phaseError = distributionPhaseISL( generator ); }
-//                std::cout << "Current sat: " << currentSatelliteID << " at epoch " << epochTime << " phase noise: " << phaseError << std::endl;
                 double zeroPhaseDeviation = 0; // waveLength*(receiverZeroPhase - transmitterZeroPhase)
                 if( i == 0 || availabilityMatrix( i-1, currentSatelliteID ) == 0 ) {
                     currentCarrierAmbiguity[ currentSatelliteID ] = rand() % 20000 + -10000;
-                    std::cout << currentCarrierAmbiguity[ currentSatelliteID ] << ", ";
+//                    std::cout << currentCarrierAmbiguity[ currentSatelliteID ] << ", ";
                 }
                 double carrierAmbiguity = currentCarrierAmbiguity[ currentSatelliteID ]; //double carrierAmbiguity = 2e6;
                 correctedPhasesPerUserPerEpoch[ userSatellite ][ epochTime ][ currentSatelliteID ] += ( phaseError + zeroPhaseDeviation - carrierAmbiguity );
-//                correctedPhasesPerUserPerEpoch[ userSatellite ][ epochTime ][ currentSatelliteID ] += ( phaseError + zeroPhaseDeviation - carrierAmbiguity + clockOffSet );
-//                std::cout << correctedPhasesPerUserPerEpoch[ userSatellite ][ epochTime ][ currentSatelliteID ] << ", ";
-//                std::cout << correctedRangesPerUserPerEpoch[ userSatellite ][ epochTime ][ currentSatelliteID ] << ", ";
-//                std::cout << "epoch: " << epochTime << ", user: " << userSatellite << ", prn: " << currentSatelliteID << ", phase data: " << correctedPhasesPerUserPerEpoch[ userSatellite ][ epochTime ][ currentSatelliteID ] << std::endl;
-//                std::cout << "phase error: " << phaseError << ", zerophasedev: " << zeroPhaseDeviation << ", carrieramb: " << carrierAmbiguity << std::endl;
             }
         }
-//        std::cout << "epoch loop  of sat: " <<  i <<"/"<< numberOfSatellitesPEC << std::endl;
     }
 }

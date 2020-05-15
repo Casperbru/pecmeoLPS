@@ -46,7 +46,7 @@ int main( )
     std::ostringstream timeSpan;
 //    double days = 1;  const double simulationEndEpoch = days * physical_constants::JULIAN_DAY; timeSpan << "/" << days << "d/";
 //    double hours = 2; const double simulationEndEpoch = 60.0*60.0*hours; timeSpan << "/" << hours << "h/";
-    double minutes = 20; const double simulationEndEpoch = 60.0*minutes; timeSpan << "/" << minutes << "min/";
+    double minutes = 10; const double simulationEndEpoch = 60.0*minutes; timeSpan << "/" << minutes << "min/";
 
     // Set numerical integration fixed step size.
     const double fixedStepSize = 30.0;
