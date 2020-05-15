@@ -235,6 +235,7 @@ int main( )
 */
 
     /// GPS Book Example
+    /// From: J. Spilker Jr,  P. Axelrad,  B. W. Parkinson,  P. Enge,  Global Positioning System:  Theory and Applications, Volume I, American Institute of Aeronautics and Astronautics, 1996. Page 414
 #define FOLDINGSTART {
     std::cout.precision(16);
     Eigen::Vector4d trueState; trueState << 6378137.0, 0.0, 0.0, 85000.0;
