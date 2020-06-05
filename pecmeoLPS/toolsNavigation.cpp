@@ -1239,6 +1239,10 @@ std::map< std::string, std::map< double, Eigen::Vector4d > > getKinematicEstimat
         iterationHistory.col(iterationHistory.cols()-1) = kinematicEstimation;
 
         iteration += 1;
+        if ( iteration == maxIterationsKinematic )
+        {
+            std::cout << "SKRT: " << correction << std::endl;
+        }
 
         for( long long userIndex = 0; userIndex < numberOfUsers; userIndex++ )
         {

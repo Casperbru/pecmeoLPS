@@ -44,9 +44,9 @@ int main( )
 
     // Set simulation end epoch.
     std::ostringstream timeSpan;
-//    double days = 1;  const double simulationEndEpoch = days * physical_constants::JULIAN_DAY; timeSpan << "/" << days << "d/";
+    double days = 1;  const double simulationEndEpoch = days * physical_constants::JULIAN_DAY; timeSpan << "/" << days << "d/";
 //    double hours = 2; const double simulationEndEpoch = 60.0*60.0*hours; timeSpan << "/" << hours << "h/";
-    double minutes = 10; const double simulationEndEpoch = 60.0*minutes; timeSpan << "/" << minutes << "min/";
+//    double minutes = 10; const double simulationEndEpoch = 60.0*minutes; timeSpan << "/" << minutes << "min/";
 
     // Set numerical integration fixed step size.
     const double fixedStepSize = 30.0;
@@ -112,7 +112,7 @@ int main( )
 
 
     // // Error Settings
-    bool noiseError = false;
+    bool noiseError = true;
     std::stringstream errorMap; errorMap << "/error";
     double stddevCode  = 1.0e-0;  double codeWeight = pow( stddevCode, -2.0 ); // sigma^-2 = weight (sigma = stddev, sigma^2 = variance)
     double stddevPhase  = 1.0e-3; double phaseWeight = pow( stddevPhase, -2.0 );
@@ -177,7 +177,7 @@ int main( )
         {
             for( int SPPISL = 0; SPPISL < 1; SPPISL++ )
             {
-                for( int KinISL = 1; KinISL < 2; KinISL++ )
+                for( int KinISL = 0; KinISL < 1; KinISL++ )
                 {
                     std::cout << "\nDeze combi: " << SPP << Kin << SPPISL << KinISL << std::endl;
 //                    std::chrono::system_clock::time_point time1 = std::chrono::system_clock::now();
@@ -213,7 +213,7 @@ int main( )
 //                                            estimationsKinSmartPerUserISL, allUsersPPIterations, allUsersKinIterations, biasIterations, false, false, true, false, false, false );
 
 //                    writeEstimationEndResults( numberOfSatellitesPEC, satelliteNames, outputSubFolder, maxIterationsPP, maxIterationsKin, maxIterationsPPISL, maxIterationsKinISL, estimationsKinPerUserPerIteration );
-                    writeEstimationFinalResults( numberOfSatellitesPEC, satelliteNames, outputSubFolder, estimationsFinal );
+//                    writeEstimationFinalResults( numberOfSatellitesPEC, satelliteNames, outputSubFolder, estimationsFinal );
 
                     allUsersDOPResults.clear();
                     estimationsPPSequencePerUser.clear();
